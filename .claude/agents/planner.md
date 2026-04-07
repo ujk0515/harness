@@ -207,6 +207,14 @@ storage.projectPage = penpot.currentPage;
   - 조건부 노출: 언제 보이고 언제 숨겨지는지
 - 배경: #333333 (헤더), #FFFFFF (본문)
 - 텍스트: #FFFFFF (헤더), #333333 (본문)
+- **행 높이는 고정하지 않는다.** Description Text를 `growType: 'auto-height'`로 생성하고, 100ms 대기 후 실제 높이를 읽어서 다음 행의 y 좌표를 계산한다.
+  ```javascript
+  descText.growType = 'auto-height';
+  await new Promise(r => setTimeout(r, 100));
+  const textHeight = descText.height;
+  nextY = currentY + Math.max(textHeight + 20, 40); // 최소 40px, 텍스트 높이 + 여백 20px
+  ```
+- 모든 행 생성이 끝난 뒤 `desc_*` Board를 실제 콘텐츠 높이에 맞게 resize한다
 
 ### Penpot API 사용 규칙
 
