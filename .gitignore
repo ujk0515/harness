@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code (로컬 세션/메모리 — 에이전트 프롬프트는 포함)
+.claude/agent-memory/
+.claude/settings.json
+
+# Workspace 산출물 (프로젝트별 결과물, 하네스 구조가 아닌 실행 결과)
+workspace/
+
+# Playwright
+test-results/
+playwright-report/
+
+# Env
+.env
+.env.local
+*.env
+
+# Logs
+*.log
