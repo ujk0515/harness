@@ -170,11 +170,14 @@ storage.projectPage = penpot.currentPage;
 - `desc_[screen_id]`: 화면 설명만 담는 설명 Board
 
 두 Board는 같은 y축에 두고 x축으로 나란히 배치한다. 하나의 Board 안에 좌/우로 합치지 않는다.
-- 화면 쌍 단위 배치 규칙:
+- 화면 쌍 단위 배치 규칙 (가로 배열):
   - `wf_*`를 왼쪽, `desc_*`를 오른쪽에 둔다
-  - 두 Board 간 x축 간격은 40px로 고정한다
-  - 다음 화면 쌍은 **이전 화면 쌍의 가장 큰 높이 + 120px 간격** 아래에 새 row로 배치한다
-  - 한 row에는 하나의 화면 쌍만 둔다
+  - 두 Board 간 x축 간격은 40px
+  - 화면 쌍 1개의 너비: wf(390) + 40 + desc(460) = 890px
+  - 다음 화면 쌍은 **같은 y축에서 x축 오른쪽으로 이어 배치**한다. 쌍 간 x축 간격은 80px
+  - 전체 쌍 간격: 890 + 80 = 970px 단위
+  - 모든 wf+desc 쌍은 **y=0 한 줄**에 가로로 나열한다
+  - `storage.nextPairX`로 다음 쌍 시작 x좌표를 관리한다
 
 ```
 ┌──────────────────────┐   ┌──────────────────────────────┐
@@ -220,18 +223,22 @@ storage.projectPage = penpot.currentPage;
 
 #### Board 생성 방법
 ```javascript
-// ✅ 올바른 방법 — createBoard()는 자동으로 현재 페이지에 추가됨
+// ✅ 올바른 방법 — 가로 배열, createBoard()는 자동으로 현재 페이지에 추가됨
+if (!storage.nextPairX) storage.nextPairX = 0;
+
 const wfBoard = penpot.createBoard();
 wfBoard.name = "wf_auth_login";
-wfBoard.x = 0;
+wfBoard.x = storage.nextPairX;
 wfBoard.y = 0;
 wfBoard.resize(390, 844);
 
 const descBoard = penpot.createBoard();
 descBoard.name = "desc_auth_login";
-descBoard.x = 430;
+descBoard.x = storage.nextPairX + 430;
 descBoard.y = 0;
 descBoard.resize(460, 900);
+
+storage.nextPairX += 970; // 다음 화면 쌍 시작 x좌표
 
 // ❌ 잘못된 방법 — Page에는 appendChild가 없음
 page.appendChild(wfBoard);  // 에러 발생!
@@ -243,13 +250,14 @@ page.appendChild(wfBoard);  // 에러 발생!
   - 예: `storage.screens[screenId] = { wfBoardId, descBoardId, rowY }`
 - 화면 단위 공통 시작점은 `storage.nextRowY`로 관리한다
 - 화면 1개의 실행 순서 (최소 4~6회 분할):
-  1. `wf_*` Board 생성 → `storage.screens[screenId].wfBoardId` 저장
+  1. `wf_*` Board 생성 (x=`storage.nextPairX`, y=0) → `storage.screens[screenId].wfBoardId` 저장
   2. `wf_*` 상단 구조 생성
   3. `wf_*` 중간/하단 구조 생성
-  4. `desc_*` Board 생성 → `storage.screens[screenId].descBoardId` 저장
+  4. `desc_*` Board 생성 (x=`storage.nextPairX + 430`, y=0) → `storage.screens[screenId].descBoardId` 저장
   5. `desc_*` 헤더 생성 (화면ID, 화면명, 경로)
   6. `desc_*` 본문 생성 (No별 Description 행)
-- 매 호출 끝에 `storage.screens[screenId]`와 `storage.nextRowY`를 업데이트한다
+- 매 호출 끝에 `storage.screens[screenId]`를 업데이트한다
+- 화면 1개 완성 후 `storage.nextPairX += 970`으로 다음 쌍 위치를 갱신한다
 - Text 생성 후 크기를 읽어야 하면 `await new Promise(r => setTimeout(r, 100))` 대기
 - `desc_*` 본문 생성 후에는 실제 내용 높이를 기준으로 Board를 다시 resize한다
   - 최소 높이: 900
@@ -268,7 +276,7 @@ page.appendChild(wfBoard);  // 에러 발생!
 - 태블릿 variant(`screen_id`가 `_tablet`으로 끝나는 경우): 1024×1366 기본
 - `desc_[screen_id]`: 460×가변
 - 두 Board는 근접 배치하되 서로 독립 객체로 유지한다
-- 화면 쌍 row 간 y축 간격은 120px 기본으로 잡는다
+- 모든 화면 쌍은 y=0 한 줄에 가로로 나열한다. 쌍 간 x축 간격은 970px 단위
 - project-config.md의 플랫폼 설정을 따른다
 
 ### 원칙

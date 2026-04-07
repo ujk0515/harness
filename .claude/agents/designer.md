@@ -221,12 +221,17 @@ hooks:
 
 #### 디자인 Board 배치 / 저장 규칙
 
-- `design_*` Board는 기존 `wf_*` / `desc_*` 영역을 건드리지 않도록 별도 design zone에 배치한다
-- `storage.designBoards[screenId] = { boardId, x, y, width, height }` 형태로 저장한다
-- 공통 시작점은 `storage.designStartX`, `storage.designNextRowY`로 관리한다
-- 한 row에는 하나의 `design_*` Board만 둔다
-- 다음 `design_*` Board는 이전 Board의 높이 + 120px 간격 아래에 배치한다
-- 재실행 시에는 기존 `storage.designBoards[screenId]`가 있으면 재사용하거나 해당 Board만 갱신한다
+- `design_*` Board는 `wf_*` / `desc_*` 행 아래에 **두 번째 가로 행**으로 배치한다
+- 배치 y좌표: `wf_*` 행의 최대 높이(보통 844px) + 120px 간격 = **y=964** 기본
+- 각 `design_*`의 x좌표는 대응하는 `wf_*` Board와 동일하게 맞춘다
+  - 예: `wf_auth_login`이 x=0이면 `design_auth_login`도 x=0
+  - 예: `wf_home_list`가 x=970이면 `design_home_list`도 x=970
+- `storage.designBoards[screenId] = { boardId, x, y }` 형태로 저장한다
+- 레이아웃 요약:
+  ```
+  y=0:    [wf+desc] [wf+desc] [wf+desc] ...  ← 가로 한 줄
+  y=964:  [design]  [design]  [design]  ...  ← 가로 한 줄, wf와 x 정렬
+  ```
 
 #### 컴포넌트 조립 규칙
 
