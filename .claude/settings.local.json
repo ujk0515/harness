@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "mcp__penpot__execute_code",
-      "mcp__penpot__penpot_api_info"
+      "mcp__penpot__penpot_api_info",
+      "mcp__penpot__export_shape"
     ]
   }
 }
