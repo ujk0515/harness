@@ -34,7 +34,8 @@ hooks:
 ### 1. 기획 리뷰 요청 (루프 B)
 기획 문서와 함께 호출된다.
 1. 기획서를 꼼꼼히 읽고 핵심 `screen_id`, 상태 화면, 플랫폼 variant를 먼저 추출한다
-2. `export_shape` 도구로 `wf_*`, `desc_*`, `design_*`를 시각적으로 확인한다
+2. **프로젝트 페이지로 전환한다** — project-config.md의 프로젝트명으로 `penpotUtils.getPageByName(프로젝트명)` → `penpot.openPage()`
+3. `export_shape` 도구로 `wf_*`, `desc_*`, `design_*`를 시각적으로 확인한다
 3. 기획서에 정의된 핵심 화면/상태/variant에 대응하는 Board가 실제로 존재하는지 먼저 확인한다
    - `wf_*` 또는 `desc_*`가 없으면 구조 기준 누락으로 기록한다
    - `design_*`가 없으면 시각 기준 누락으로 기록한다

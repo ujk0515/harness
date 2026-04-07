@@ -140,6 +140,30 @@ hooks:
 
 기획서 작성 후, 확정된 기획 판단을 Penpot Board로 옮긴다. Penpot 작업은 기획 판단을 대체하지 않는다.
 
+### 프로젝트 페이지 생성 (필수 — 가장 먼저 실행)
+
+Board 생성 전에 **project-config.md의 프로젝트명으로 Penpot 페이지를 생성하고 전환**한다.
+이미 같은 이름의 페이지가 있으면 새로 만들지 않고 해당 페이지로 전환한다.
+
+```javascript
+// ✅ 프로젝트 페이지 생성/전환 — Board 생성 전 반드시 실행
+const projectName = "TripLog"; // project-config.md에서 읽은 프로젝트명
+
+// 기존 페이지 확인
+const existing = penpotUtils.getPageByName(projectName);
+if (existing) {
+  penpot.openPage(existing);
+} else {
+  const newPage = penpot.createPage();
+  newPage.name = projectName;
+  penpot.openPage(newPage);
+}
+
+storage.projectPage = penpot.currentPage;
+```
+
+이후 모든 `wf_*`, `desc_*` Board는 이 프로젝트 페이지 안에 생성한다.
+
 ### Board 레이아웃 구조 (필수)
 각 화면은 하나의 Board가 아니라 아래 두 개의 독립 Board로 만든다.
 - `wf_[screen_id]`: 실제 화면 구조만 담는 와이어프레임 Board

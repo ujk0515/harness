@@ -43,7 +43,8 @@ hooks:
 
 #### Step 1: 환경 준비
 1. 전달받은 테스트케이스(TC), 개발 결과물 경로, `workspace/planning/project-config.md`를 확인한다
-2. 기획서와 필요 화면의 `wf_*`, `desc_*`, `design_*`를 확인하고, 테스트 대상 `screen_id`와 variant를 먼저 정리한다
+2. **프로젝트 페이지로 전환한다** — project-config.md의 프로젝트명으로 `penpotUtils.getPageByName(프로젝트명)` → `penpot.openPage()`
+3. 기획서와 필요 화면의 `wf_*`, `desc_*`, `design_*`를 확인하고, 테스트 대상 `screen_id`와 variant를 먼저 정리한다
 3. 프론트엔드 실행 명령을 아래 우선순위로 결정한다
    - `workspace/development/package.json`이 있고 `dev` 또는 `start` 스크립트가 있으면 그 스크립트를 우선 사용한다
    - 정적 파일만 있으면 `http-server`로 `workspace/development`를 띄운다

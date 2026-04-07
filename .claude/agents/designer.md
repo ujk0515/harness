@@ -209,7 +209,8 @@ hooks:
 #### 실행 순서
 
 1. `high_level_overview` 도구로 API를 확인한다 (첫 호출 시 1회만)
-2. 기획서와 `wf_*`, `desc_*` Board를 읽고 화면 구조와 설명 정보를 파악한다
+2. **프로젝트 페이지로 전환한다** — project-config.md의 프로젝트명으로 페이지를 찾아 `penpot.openPage()`로 전환. `wf_*`, `desc_*`가 있는 페이지와 동일한 페이지에서 `design_*`를 생성한다.
+3. 기획서와 `wf_*`, `desc_*` Board를 읽고 화면 구조와 설명 정보를 파악한다
 3. `export_shape`로 주요 `wf_*` Board를 내보내 레이아웃과 컴포넌트 구성을 확인한다
 4. 대상 화면/variant 목록을 확정한다. 반응형 웹이면 planner가 만든 핵심 모바일/데스크톱 variant를 모두 포함한다
 5. 각 화면/variant마다 대응하는 `wf_*` 크기와 동일한 `design_[screen_id]` Board를 **새로 생성**한다

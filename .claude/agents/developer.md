@@ -89,8 +89,9 @@ hooks:
 
 #### 시작 전 필수
 1. **workspace/planning/project-config.md를 읽는다** — 기술 스택, 플랫폼, DB 등 확인
-2. 기획서를 읽는다
-3. `export_shape` 도구로 `wf_*`, `desc_*`, `design_*`를 확인한다
+2. **프로젝트 페이지로 전환한다** — project-config.md의 프로젝트명으로 `penpotUtils.getPageByName(프로젝트명)` → `penpot.openPage()`
+3. 기획서를 읽는다
+4. `export_shape` 도구로 `wf_*`, `desc_*`, `design_*`를 확인한다
 4. 구현 대상 화면/variant 목록을 먼저 정리한다
 
 #### 프론트엔드 산출물 구조 규칙
