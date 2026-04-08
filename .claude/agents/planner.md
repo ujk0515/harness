@@ -40,6 +40,7 @@ hooks:
 5. 화면 흐름도를 Mermaid 코드로 작성하여 기획 문서에 포함한다
 6. **Penpot에 `wf_*`와 `desc_*` Board를 생성한다** (아래 Penpot 와이어프레임 작성 규칙 참고)
 7. 결과를 반환한다
+   - 최소 포함값: 화면 목록(`screen_id`), 생성한 `wf_*` / `desc_*` Board 목록, 건너뛴 화면(있으면)
 
 ### 2. 기획서 + 와이어프레임 수정 요청 (루프 A-2)
 디자이너의 UX 리뷰 결과와 함께 호출된다.
@@ -50,6 +51,7 @@ hooks:
 5. 기획서를 수정한다 (Read → Edit)
 6. Penpot의 `wf_*`와 `desc_*`도 지적 사항에 맞게 수정한다
 7. 수정 내역을 반환한다 (지적사항 반영 / 연동 정합성 수정 구분)
+   - 최소 포함값: 수정한 `screen_id`, 수정/유지된 `wf_*` / `desc_*` Board 목록
 
 ### 3. 평가 요청
 다른 에이전트의 결과물과 함께 호출된다 (예: 디자인 결과, 기술 검토 결과, QA 검토 결과).
@@ -155,27 +157,31 @@ hooks:
 
 ### 프로젝트 페이지 생성 (필수 — 가장 먼저 실행)
 
-Board 생성 전에 **project-config.md의 프로젝트명 + 플랫폼으로 Penpot 페이지를 생성하고 전환**한다.
+Board 생성 전에 **project-config.md의 프로젝트명 + 대상 플랫폼으로 Penpot 페이지를 생성하고 전환**한다.
+페이지 이름은 반드시 `{프로젝트명} — {플랫폼}` 형식을 사용한다.
 이미 같은 이름의 페이지가 있으면 새로 만들지 않고 해당 페이지로 전환한다.
 
 ```javascript
 // ✅ 프로젝트 페이지 생성/전환 — Board 생성 전 반드시 실행
 const projectName = "TripLog"; // project-config.md에서 읽은 프로젝트명
+const platform = "Mobile"; // 현재 작업 대상 플랫폼
+const pageName = `${projectName} — ${platform}`;
 
 // 기존 페이지 확인
-const existing = penpotUtils.getPageByName(projectName);
+const existing = penpotUtils.getPageByName(pageName);
 if (existing) {
   penpot.openPage(existing);
 } else {
   const newPage = penpot.createPage();
-  newPage.name = projectName;
+  newPage.name = pageName;
   penpot.openPage(newPage);
 }
 
-storage.projectPage = penpot.currentPage;
+if (!storage.projectPages) storage.projectPages = {};
+storage.projectPages[platform.toLowerCase()] = penpot.currentPage;
 ```
 
-이후 모든 `wf_*`, `desc_*` Board는 이 프로젝트 페이지 안에 생성한다.
+이후 모든 `wf_*`, `desc_*` Board는 **대응하는 플랫폼 페이지 안에** 생성한다.
 
 ### Board 레이아웃 구조 (필수)
 각 화면은 하나의 Board가 아니라 아래 두 개의 독립 Board로 만든다.

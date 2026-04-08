@@ -224,6 +224,7 @@ hooks:
 7. `design_*` Board 안에서 아래 규칙대로 **컴포넌트를 처음부터 조립**한다
 8. `export_shape`로 `design_*` Board를 내보내 시각 확인 → 이상 있으면 수정
 9. 결과를 반환한다
+   - 최소 포함값: 대상 `screen_id` / variant 목록, 생성/수정한 `design_*` Board 목록, `export_shape` 확인 결과
 
 #### 디자인 Board 배치 / 저장 규칙
 
