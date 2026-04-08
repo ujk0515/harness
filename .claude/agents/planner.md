@@ -232,6 +232,34 @@ storage.projectPage = penpot.currentPage;
   ```
 - 모든 행 생성이 끝난 뒤 `desc_*` Board를 실제 콘텐츠 높이에 맞게 resize한다
 
+### 정렬 유틸리티 (필수 — 첫 execute_code에서 등록)
+
+와이어프레임 요소 배치 시 아래 유틸리티를 `storage`에 등록하고 사용한다. 직접 절대 좌표를 계산하지 않는다.
+
+```javascript
+// ✅ 첫 execute_code에서 실행
+storage.layout = {
+  centerX(parent, child) { child.x = parent.x + (parent.width - child.width) / 2; },
+  centerY(parent, child) { child.y = parent.y + (parent.height - child.height) / 2; },
+  center(parent, child) { this.centerX(parent, child); this.centerY(parent, child); },
+  alignLeft(parent, child, padding = 16) { child.x = parent.x + padding; },
+  alignRight(parent, child, padding = 16) { child.x = parent.x + parent.width - child.width - padding; },
+  alignTop(parent, child, padding = 16) { child.y = parent.y + padding; },
+  verticalList(parent, items, { padding = 16, gap = 12, startY = 0 } = {}) {
+    let currentY = parent.y + startY;
+    items.forEach(item => {
+      item.x = parent.x + padding;
+      item.y = currentY;
+      item.resize(parent.width - padding * 2, item.height);
+      currentY += item.height + gap;
+    });
+  }
+};
+```
+
+- 모든 요소는 `storage.layout` 함수로 배치. `shape.x = 숫자` 직접 입력은 `parent.x + offset` 패턴만 허용.
+- Board 내부 자식은 반드시 `board.appendChild(shape)` 후 위치 설정. Board 밖에 떠있으면 안 됨.
+
 ### Penpot API 사용 규칙
 
 #### Board 생성 방법

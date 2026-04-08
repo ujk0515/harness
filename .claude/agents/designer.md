@@ -364,6 +364,102 @@ Board(currentFrameWidth×56, fill:#1E3A5F, shadow:tabbar) + Flex(row, justifyCon
 - `export_shape`: Board/Shape를 이미지로 내보내기 (시각 확인 필수)
 - `import_image`: SVG/PNG 아이콘 또는 래스터 에셋을 Board에 가져오기
 
+### 정렬 유틸리티 (필수 — 첫 execute_code에서 반드시 등록)
+
+디자인 작업 시작 전에 아래 유틸리티 함수를 `storage`에 등록한다. 모든 요소 배치에 이 함수를 사용한다. 직접 좌표를 계산하지 않는다.
+
+```javascript
+// ✅ 첫 execute_code에서 반드시 실행
+storage.layout = {
+  // 부모 내부 수평 중앙 정렬
+  centerX(parent, child) {
+    child.x = parent.x + (parent.width - child.width) / 2;
+  },
+  // 부모 내부 수직 중앙 정렬
+  centerY(parent, child) {
+    child.y = parent.y + (parent.height - child.height) / 2;
+  },
+  // 부모 내부 정중앙 (수평 + 수직)
+  center(parent, child) {
+    this.centerX(parent, child);
+    this.centerY(parent, child);
+  },
+  // 부모 내부 좌측 정렬 + 패딩
+  alignLeft(parent, child, padding = 16) {
+    child.x = parent.x + padding;
+  },
+  // 부모 내부 우측 정렬 + 패딩
+  alignRight(parent, child, padding = 16) {
+    child.x = parent.x + parent.width - child.width - padding;
+  },
+  // 부모 내부 상단 정렬 + 패딩
+  alignTop(parent, child, padding = 16) {
+    child.y = parent.y + padding;
+  },
+  // 카드 그리드 배치 (부모 영역 내 N열 중앙 정렬)
+  gridCards(parent, cards, { cols = 3, gap = 24, padding = 32, startY = 0 } = {}) {
+    const areaWidth = parent.width - padding * 2;
+    const cardWidth = (areaWidth - gap * (cols - 1)) / cols;
+    cards.forEach((card, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      card.x = parent.x + padding + col * (cardWidth + gap);
+      card.y = parent.y + startY + row * (card.height + gap);
+      card.resize(cardWidth, card.height);
+    });
+  },
+  // 수직 리스트 배치 (부모 내부, 좌우 패딩, 항목 간 간격)
+  verticalList(parent, items, { padding = 16, gap = 12, startY = 0 } = {}) {
+    let currentY = parent.y + startY;
+    items.forEach(item => {
+      item.x = parent.x + padding;
+      item.y = currentY;
+      item.resize(parent.width - padding * 2, item.height);
+      currentY += item.height + gap;
+    });
+  },
+  // 텍스트를 부모 카드 내부 중앙 정렬
+  centerTextInCard(card, text) {
+    text.x = card.x + (card.width - text.width) / 2;
+    text.y = card.y + (card.height - text.height) / 2;
+  }
+};
+```
+
+**사용 규칙:**
+- 모든 요소는 `storage.layout` 함수로 배치한다. `shape.x = 숫자` 직접 입력 금지 (부모 기준 오프셋이 아닌 절대 좌표 실수 방지).
+- 예외: `storage.layout`으로 커버 안 되는 세밀한 조정만 직접 좌표 사용. 그 경우에도 `parent.x + offset` 패턴을 사용한다.
+- 카드 그리드는 반드시 `gridCards`로 배치. 수동으로 x좌표 계산하지 않는다.
+- 타이틀/서브타이틀은 반드시 `centerX` 또는 `centerTextInCard`로 중앙 정렬한다.
+
+### 정렬 검증 (작업 완료 전 필수)
+
+모든 `design_*` Board 작업 완료 후, export_shape 전에 아래 검증 코드를 실행한다:
+
+```javascript
+// ✅ 정렬 검증 — export_shape 전 실행
+function validateAlignment(board) {
+  const issues = [];
+  const bx = board.x, by = board.y, bw = board.width, bh = board.height;
+  
+  for (const child of board.children) {
+    // Board 영역 밖으로 삐져나간 요소
+    if (child.x < bx || child.y < by || 
+        child.x + child.width > bx + bw || 
+        child.y + child.height > by + bh) {
+      issues.push(`[overflow] ${child.name}: 부모 Board 영역 밖`);
+    }
+    // 너무 왼쪽에 붙은 텍스트 (패딩 없음)
+    if (child.type === 'text' && child.x - bx < 8 && child.x !== bx) {
+      issues.push(`[padding] ${child.name}: 좌측 패딩 부족`);
+    }
+  }
+  return issues.length === 0 ? 'PASS' : issues;
+}
+```
+
+검증에서 이슈가 나오면 **export_shape 전에 수정**한다. PASS가 나올 때만 export_shape로 최종 확인.
+
 ### 핵심 패턴
 - `storage` 객체에 중간 결과를 저장하면 다음 `execute_code` 호출에서 재사용 가능
 - Board 찾기: `penpotUtils.findShape(s => s.name === 'wf_auth_login')`
