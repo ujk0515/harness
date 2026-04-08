@@ -2,7 +2,7 @@
 
 ## 나는 하네스다.
 사용자가 요구사항을 주면 이 문서에 따라 에이전트들을 호출하고 루프를 자동으로 관리한다.
-사용자에게 중간에 뭘 시키지 않는다. 최종 결과만 전달한다.
+루프가 시작된 뒤에는 사용자에게 중간 확인을 시키지 않는다. 최종 결과만 전달한다.
 
 ### 자동 실행 강제 규칙
 - **루프 간 전환 시 절대 사용자에게 확인하지 않는다.** 전 루프가 끝나면 즉시 다음 루프를 시작한다.
@@ -10,6 +10,10 @@
 - 루프 A 완료 → 즉시 루프 B 시작. 루프 B 완료 → 즉시 루프 C 시작. 예외 없음.
 - 에이전트 백그라운드 작업 완료 대기 중에도 사용자에게 중간 상태를 보고하지 않는다.
 - 사용자에게 전달하는 시점은 **전체 작업 완료 후 1번**뿐이다.
+- 단, **루프 시작 전** 아래 3가지는 예외다.
+  - 필수 항목(플랫폼, 기술 스택) 확인
+  - 사전 검토 단계 질문
+  - Penpot/외부 도구 연결 확인
 
 ## 산출물 포맷 규칙
 
@@ -108,6 +112,17 @@
 
 추출한 설정은 workspace/planning/project-config.md에 저장하고, 모든 에이전트 호출 시 참조한다.
 
+### Penpot / 인프라 사전 확인
+루프 A 시작 전, 하네스는 Penpot 사용 준비 상태를 먼저 확인한다.
+
+- 확인 대상:
+  - Penpot MCP 서버 연결 가능 여부
+  - 필요한 도구 접근 가능 여부: `execute_code`, `export_shape`, `high_level_overview`, `import_image`
+  - 브라우저 Penpot 플러그인 연결 상태
+  - `project-config.md`의 프로젝트명으로 Penpot 페이지를 만들거나 찾을 수 있는 상태인지
+- 위 조건 중 하나라도 만족하지 않으면 **루프 A를 시작하지 않고 준비 필요 상태로 멈춘다**
+- 이 단계는 루프 시작 전 예외 단계이므로, 필요 시 사용자에게 연결 상태만 간단히 알릴 수 있다
+
 ## 파일 경로 레지스트리
 
 ### 파일명 규칙
@@ -130,8 +145,7 @@
 | 기술 검토 | workspace/reports/B-tech-review.md | 개발자 | |
 | QA 기획 검토 | workspace/reports/B-qa-review.md | QA | |
 | 테스트케이스 | workspace/testing/C-testcases.md | QA | |
-| 프론트 결과물 | workspace/development/index.html | 개발자 | 접두사 없음 |
-| 프론트 스타일 | workspace/development/styles.css | 개발자 | 접두사 없음 |
+| 프론트엔드 프로젝트 | workspace/development/ | 개발자 | 프론트 스택에 맞는 실제 구조 허용 |
 | 서버 엔트리 | workspace/server/index.js | 개발자 | 서버 스택 있을 때 |
 | 서버 라우트 | workspace/server/routes/ | 개발자 | API 엔드포인트 |
 | 서버 모델 | workspace/server/models/ | 개발자 | DB 스키마 |
@@ -141,12 +155,14 @@
 | 서버 README | workspace/server/README.md | 개발자 | 실행 방법 |
 | QA 검증 결과 | workspace/reports/D-qa-verification.md | QA | |
 | Playwright 테스트 | workspace/testing/playwright/ | 테스터 | 브라우저 실행 테스트 |
+| Playwright 결과 JSON | workspace/reports/playwright-results.json | 테스터 | Playwright reporter 산출물 |
 | 테스터 검증 결과 | workspace/reports/D-tester-verification.md | 테스터 | |
 | 에이전트 로그 | workspace/reports/agent-log.txt | 비서 | 접두사 없음 |
 | 최종 보고서 | workspace/reports/final-report.md | 비서 | 접두사 없음 |
 
 ### 규칙
 - 에이전트가 위 목록에 없는 파일을 만들면 안 된다.
+- **디렉터리 경로로 등록된 항목은 그 하위 파일/폴더 생성을 허용한다.**
 - 하네스가 에이전트를 호출할 때 "저장 경로: {위 경로}" 형태로 명시적으로 전달한다.
 - 같은 루프 안에서 반복할 때는 같은 파일을 덮어쓴다.
 - 단계 완료 후 되돌아와서 수정이 필요하면 버전업한다 (예: A-planning-doc.md → A-planning-doc-v2.md)
@@ -206,28 +222,29 @@
 ### 루프 B: 전체 기획 리뷰 (개발자 + QA + 기획자)
 1. Agent(developer) 호출: "기획서: {경로}. `wf_*`, `desc_*`, `design_*`를 확인해. 기술 검토 + 실현 가능성 의견 내"
 2. Agent(qa) 호출: "기획서: {경로}. `wf_*`, `desc_*`, `design_*`를 확인해. 기획 검토 + 테스트 관점 의견 내"
-3. Agent(planner) 호출: "개발자 의견: {경로}, QA 의견: {경로}. 종합하여 타협점 정리. 기획서 최종 수정 + 필요시 `wf_*` + `desc_*` 수정. 변경 내용을 '기능 변경'과 '문구/구조 정리'로 분류해서 반환해. 점수도 반환해"
+3. Agent(planner) 호출: "개발자 의견: {경로}, QA 의견: {경로}. 종합하여 타협점 정리. 기획서 최종 수정 + 필요시 `wf_*` + `desc_*` 수정. 변경 내용을 '기능 변경', '문구/구조 정리', '`wf_*`/`desc_*` 변경 여부'로 분류해서 반환해. 점수도 반환해"
 4. 기획자 변경 내용 확인:
+   - `wf_*` / `desc_*` 변경 있음 → Agent(designer) 호출: "변경된 기획서 + `wf_*` + `desc_*`를 기준으로 영향받는 `design_*`만 재동기화해. 변경 없는 `design_*`는 건드리지 마"
    - 기능 변경 있음 → Agent(developer) 호출: "기획자 수정 내역: {변경분}. 기술적으로 문제 없는지 확인해"
-   - 문구/구조만 → 재검토 없이 기획자 점수로 판정
+   - 문구/구조만 있고 Penpot 영향 없음 → 재검토 없이 기획자 점수로 판정
 5. 통과 기준 미만 → 1번 반복
 6. 통과 기준 이상 → 루프 B 완료
 
 ### 루프 C: 개발 + 테스트케이스 작성 (동시 진행)
-1. Agent(developer) 호출: "기획서: {경로}. `wf_*`, `desc_*`, `design_*`를 참조하여 프론트엔드 개발해 (workspace/development/). 서버 스택이 있으면 workspace/server/에 서버도 개발해"
-2. Agent(qa) 호출: "기획서: {경로}. `wf_*`, `desc_*`, `design_*`를 확인해. 테스트케이스 작성해 (프론트 + 서버 API 둘 다)"
+1. Agent(developer) 호출: "project-config.md + 기획서: {경로}. `wf_*`, `desc_*`, `design_*`를 참조하여 프론트엔드 개발해 (workspace/development/). 서버 스택이 있으면 workspace/server/에 서버도 개발해"
+2. Agent(qa) 호출: "project-config.md + 기획서: {경로}. `wf_*`, `desc_*`, `design_*`를 확인해. 테스트케이스 작성해 (프론트 + 서버 API 둘 다)"
 
 ### 루프 D: 개발 ↔ 검증
-1. Agent(qa) 호출: "결과물: {경로}, 테스트케이스: {경로}. 코드 정적 분석으로 검증해"
-2. Agent(tester) 호출: "결과물: {경로}, 테스트케이스: {경로}. Playwright로 브라우저 실행 테스트해"
+1. Agent(qa) 호출: "project-config.md + 기획서 + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로}. 코드 정적 분석으로 검증해"
+2. Agent(tester) 호출: "project-config.md + 기획서 + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로}. Playwright로 브라우저 실행 테스트해"
 3. QA(정적 분석) + 테스터(브라우저 실행) 점수 종합 (둘 중 낮은 점수 기준)
 4. 통과 기준 미만 → 이슈 분류:
    - 동작 오류 → Agent(developer) 수정 → 5번으로
-   - 기획 문제 → Agent(planner) 수정 → 루프 C-1번으로
+   - 기획 문제 → Agent(planner) 수정 → `wf_*` / `desc_*` 영향 있으면 Agent(designer)로 `design_*` 재동기화 → 루프 C-1번으로
    - 화면 문제 → Agent(designer) 수정 후 Agent(planner) 확인 → 루프 C-1번으로
 5. **재검증 (턴 2 이후):** 하네스가 이전 이슈 목록 + 개발자 수정 내역을 함께 전달한다
-   - Agent(qa) 호출: "이전 이슈: {목록}, 수정 내역: {변경분}. 수정된 부분 확인 + 회귀 없는지 체크해"
-   - Agent(tester) 호출: "이전 이슈: {목록}, 수정 내역: {변경분}. 수정된 부분 Playwright로 재테스트 + 기존 PASS 항목 회귀 체크해"
+   - Agent(qa) 호출: "project-config.md + 기획서 + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분}. 수정된 부분 확인 + 회귀 없는지 체크해"
+   - Agent(tester) 호출: "project-config.md + 기획서 + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분}. 수정된 부분 Playwright로 재테스트 + 기존 PASS 항목 회귀 체크해"
    - 3번으로
 6. 통과 기준 이상 → 루프 D 완료
 
@@ -298,7 +315,7 @@
 (없으면 이 섹션 생략)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- open workspace/development/index.html
+ open workspace/development/
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -339,19 +356,20 @@
     하네스 → 개발자 → 기획서 + `wf_*` + `desc_*` + `design_*` 확인 후 기술 검토
     하네스 → QA → 기획서 + `wf_*` + `desc_*` + `design_*` 확인 후 기획 검토
     하네스 → 기획자 → 의견 종합, 타협점 정리, 기획서 최종 수정 + 필요시 `wf_*` + `desc_*` 수정 + 점수
+    하네스 → 디자이너 → `wf_*` / `desc_*` 변경이 있으면 영향받는 `design_*`만 재동기화
     → 통과 기준 미만 → 반복
     → 통과 기준 이상 → 루프 C로
     ↓
 [루프 C] 개발 + 테스트케이스 (동시 진행)
-    하네스 → 개발자 → `wf_*` + `desc_*` + `design_*` 참조하여 프론트엔드 + 서버 개발
-    하네스 → QA → 기획서 + `wf_*` + `desc_*` + `design_*` 기준으로 테스트케이스 작성
+    하네스 → 개발자 → project-config.md + `wf_*` + `desc_*` + `design_*` 참조하여 프론트엔드 + 서버 개발
+    하네스 → QA → project-config.md + 기획서 + `wf_*` + `desc_*` + `design_*` 기준으로 테스트케이스 작성
     ↓
 [루프 D] 개발 결과물 ↔ 검증
-    하네스 → QA → 코드 정적 분석으로 검증
-    하네스 → 테스터 → Playwright 브라우저 실행 테스트 (동시 진행)
+    하네스 → QA → project-config.md + 기획서 + Penpot 기준으로 코드 정적 분석 검증
+    하네스 → 테스터 → project-config.md + 기획서 + Penpot 기준으로 Playwright 브라우저 실행 테스트 (동시 진행)
     → 이슈 발견 시
        - 동작 오류 → 하네스가 개발자 호출하여 수정 → 재검증
-       - 기획 문제 → 하네스가 기획자 호출하여 기획서 + `wf_*` + `desc_*` 수정 → 루프 C부터
+       - 기획 문제 → 하네스가 기획자 호출하여 기획서 + `wf_*` + `desc_*` 수정 → 필요 시 디자이너가 `design_*` 재동기화 → 루프 C부터
        - 화면 문제 → 하네스가 디자이너 호출하여 `design_*` 수정 후 필요시 기획자 확인 → 루프 C부터
     → 전부 통과 → 검증 완료
     ↓
@@ -377,9 +395,9 @@
 | 루프A-1 | 기획자 → 디자이너 | 기획서 + `wf_*` + `desc_*`, UX 리뷰 | 디자이너 판단 |
 | 루프A-2 | 기획자 ↔ 디자이너 | 기획서 수정 + `wf_*` / `desc_*` 수정, 재검토 | 통과 기준 이상 |
 | 루프A-3 | 디자이너 | `wf_*` / `desc_*` 참조 `design_*` 생성 | 완료 |
-| 루프B | 개발자 + QA → 기획자 | 기획서 + `wf_*` + `desc_*` + `design_*` 기준 기술/기획 검토 → 종합 수정 | 통과 기준 이상 |
-| 루프C | 개발자 + QA (동시) | `wf_*` + `desc_*` + `design_*` 참조 프론트/서버 개발 + TC 작성 | 완료 |
-| 루프D | QA + 테스터 | 검증 + 반복 테스트 | 통과 기준 이상 |
+| 루프B | 개발자 + QA → 기획자 → 디자이너(필요 시) | 기획서 + `wf_*` + `desc_*` + `design_*` 기준 기술/기획 검토 → 종합 수정 → `design_*` 재동기화 | 통과 기준 이상 |
+| 루프C | 개발자 + QA (동시) | project-config.md + `wf_*` + `desc_*` + `design_*` 참조 프론트/서버 개발 + TC 작성 | 완료 |
+| 루프D | QA + 테스터 | project-config.md + 기획서 + Penpot 기준 검증 + 반복 테스트 | 통과 기준 이상 |
 | 3 | 사용자 | 최종 결과 | - |
 | 루프E | 해당 에이전트 | VOC 반영 | 사용자 OK |
 | 4 | 비서 | 정리 보고 | 완료 |
