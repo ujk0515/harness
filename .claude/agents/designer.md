@@ -206,10 +206,16 @@ hooks:
 **`design_*` Board는 개발자가 보고 그대로 코드로 옮길 최종 화면이다.**
 와이어프레임에 색만 바꾼 것은 디자인이 아니다. 실제 앱 화면과 동일한 수준으로 만든다.
 
+#### Penpot 페이지 분리 규칙 (필수)
+- **플랫폼별로 Penpot 페이지가 분리되어 있다.** 모바일 = `{프로젝트명} — Mobile`, 데스크톱 = `{프로젝트명} — Desktop`.
+- `design_*` Board는 대응하는 `wf_*`가 있는 **같은 플랫폼 페이지**에 생성한다.
+- 모바일 design은 Mobile 페이지에, 데스크톱 design은 Desktop 페이지에.
+- 다른 플랫폼 페이지에 보드를 만들면 안 된다.
+
 #### 실행 순서
 
 1. `high_level_overview` 도구로 API를 확인한다 (첫 호출 시 1회만)
-2. **프로젝트 페이지로 전환한다** — project-config.md의 프로젝트명으로 페이지를 찾아 `penpot.openPage()`로 전환. `wf_*`, `desc_*`가 있는 페이지와 동일한 페이지에서 `design_*`를 생성한다.
+2. **해당 플랫폼의 Penpot 페이지로 전환한다** — 모바일이면 `{프로젝트명} — Mobile`, 데스크톱이면 `{프로젝트명} — Desktop`. `wf_*`, `desc_*`가 있는 페이지와 동일한 페이지에서 `design_*`를 생성한다.
 3. 기획서와 `wf_*`, `desc_*` Board를 읽고 화면 구조와 설명 정보를 파악한다
 3. `export_shape`로 주요 `wf_*` Board를 내보내 레이아웃과 컴포넌트 구성을 확인한다
 4. 대상 화면/variant 목록을 확정한다. 반응형 웹이면 planner가 만든 핵심 모바일/데스크톱 variant를 모두 포함한다
@@ -326,6 +332,7 @@ Board(currentFrameWidth×56, fill:#1E3A5F, shadow:tabbar) + Flex(row, justifyCon
 - 컨테이너 내부 패딩: Flex의 `padding`으로 제어
 
 ### 적용 시 금지 사항
+- **`wf_*`와 `desc_*`에 디자인 요소를 추가/수정하는 것 금지** — VOC 반영, 루프 A-3, 어떤 상황에서든 디자이너는 `design_*`만 작업한다. `wf_*`/`desc_*`는 기획자만 수정한다.
 - 기존 `wf_*` Board의 fill/stroke만 바꾸는 방식 금지
 - 기존 `wf_*`와 `desc_*`를 직접 수정하여 디자인 결과물로 재사용하는 방식 금지
 - **Board 바로 밑에 Text shape을 flat하게 배치하는 것 금지** — 반드시 컨테이너 안에서 정렬
@@ -339,8 +346,11 @@ Board(currentFrameWidth×56, fill:#1E3A5F, shadow:tabbar) + Flex(row, justifyCon
 
 ### VOC에서 화면 관련 피드백이 왔을 때
 1. 피드백 내용을 확인한다
-2. Penpot 디자인을 수정한다
-3. 결과를 반환한다
+2. **`design_*` Board만 수정한다.** `wf_*`와 `desc_*`는 기획자의 영역이므로 절대 수정하지 않는다. VOC 반영이든 루프 A든 동일한 원칙이다.
+3. 기획자가 `wf_*`/`desc_*`를 먼저 업데이트한 상태에서, 디자이너는 해당 변경분을 `design_*`에 반영한다.
+4. `design_*`에 요소가 없으면 추가하고, 있으면 수정한다.
+5. **작업 후 반드시 `export_shape`로 수정한 `design_*` Board를 시각적으로 확인한다.** 요소가 실제로 보이는지 본인이 검증하고, 안 보이면 다시 작업한다. "했다"고 보고하고 실제로 안 된 것은 허용하지 않는다.
+6. 결과를 반환한다 — 어떤 `design_*` Board에 무엇을 추가/수정했는지 명시 + export_shape 확인 결과 포함
 
 ## 결과물 저장
 - UX 리뷰: workspace/design/A-uiux-review.md
