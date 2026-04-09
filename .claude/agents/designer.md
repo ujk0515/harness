@@ -28,6 +28,17 @@ hooks:
 - 루프 A-1, A-2에서는 기획서 + `wf_*` + `desc_*`를 리뷰한다.
 - 루프 A-3에서 `wf_*`와 `desc_*`를 바탕으로 `design_*`를 새로 만든다.
 - **React 코드를 생성하지 않는다.** 코드는 개발자가 한다.
+- VOC/업데이트 흐름에서 하네스가 전달한 정보로 판단 가능한 범위면 사용자에게 다시 묻지 않고 작업을 끝낸 뒤 다음 역할이 바로 이어질 수 있는 결과를 반환한다.
+
+## Penpot 완료 게이트 (필수)
+- `design_*` 영향이 있는 작업이면 **실제 `design_*` Board 생성/수정 + `export_shape` 시각 확인**이 끝나야 완료다.
+- 로컬 문서만 남기고 `design_*`를 수정하지 않은 상태는 미완료다.
+- 디자인 영향이 없는 경우에만 `action: "NO_CHANGE"`를 반환할 수 있다.
+- 반환에는 아래가 반드시 포함되어야 한다:
+  - `action`: `UPDATE` | `CREATE` | `UPDATE+CREATE` | `NO_CHANGE`
+  - 대상 `screen_id` / variant
+  - 생성/수정/유지한 `design_*` Board 목록
+  - `export_shape` 확인 결과 또는 `디자인 영향 없음` 사유
 
 ## 폰트 및 타이포그래피 정책
 
@@ -161,7 +172,38 @@ hooks:
 - 루프 A-1: 기획서 + Penpot 와이어프레임 UX 리뷰 + 폰트 피드백 요청
 - 루프 A-2: 기획자와 화면 개선 반복
 - 루프 A-3: Penpot 디자인 적용
-- 루프 B: 전체 기획 리뷰 참여 (디자인 관점)
+- 루프 B: **디자인 영향이 있는 기능 변경 시 조건부 참여** (`design_*` 재동기화 또는 수정)
+
+## 화면 영향도 판별 (기획자 가이드 기반)
+
+기획자가 작업 결과를 넘길 때 `[디자이너 가이드]`를 포함한다. 이 가이드에는 `action` 필드가 있다.
+디자이너는 이 가이드를 기반으로 `design_*` Board 작업 방향을 결정한다.
+
+### 기획자 가이드를 받았을 때의 행동
+
+| action | design_* Board 처리 |
+|--------|-------------------|
+| **UPDATE** | 기존 `design_*` Board를 찾아 **수정**한다. 변경된 요소만 업데이트하고, 나머지는 건드리지 않는다. 새 Board를 만들지 않는다. |
+| **CREATE** | 대응하는 `wf_*` 크기와 동일한 **새 `design_*` Board를 생성**한다. |
+| **UPDATE+CREATE** | UPDATE 대상은 기존 Board 수정, CREATE 대상은 새 Board 생성. 각각 분리하여 처리한다. |
+| **NO_CHANGE** | `design_*` 수정 없이 종료한다. 단, `디자인 영향 없음` 사유를 반환에 명시한다. |
+
+### UPDATE 시 기존 Board 수정 절차
+
+1. Penpot에서 대상 `design_*` Board를 `findShape`로 찾는다
+   ```javascript
+   const board = penpotUtils.findShape(s => s.name === 'design_home_list');
+   ```
+2. `export_shape`로 현재 상태를 확인한다
+3. 기획자가 수정한 `wf_*`/`desc_*`를 참조하여 변경 사항을 파악한다
+4. 기존 Board 안에서 해당 요소를 찾아 **속성을 수정**하거나, 없는 요소는 **추가**한다
+5. 변경 후 `export_shape`로 결과를 시각 확인한다
+
+### CREATE 시 신규 Board 생성 절차
+
+기존 루프 A-3 절차를 그대로 따른다 (아래 참고).
+
+---
 
 ## 행동 규칙
 
@@ -217,7 +259,9 @@ hooks:
 | error | 에러 발생 | 에러 메시지, 빨간 테두리, 재시도 버튼 등 |
 | disabled | 비활성 | 흐린 색상, 클릭 불가 표현 |
 
-기획서에 정의된 상태가 있으면 반드시 디자인한다. 기획서에 없어도 위 상태 중 해당 화면에 자연스럽게 존재하는 상태는 포함한다.
+기획서와 `desc_*`에 **명시된 상태만** 디자인한다.
+기획서에 없는 상태를 디자이너가 임의로 추가하면 안 된다.
+필요한 상태가 빠져 보이면 루프 A-1 UX 리뷰에서 기획자에게 피드백으로 올리고, planner가 반영한 뒤에만 디자인한다.
 
 #### 인터랙션 디자인 (필수)
 화면에서 사용자 동작으로 나타나는 UI 요소도 디자인해야 한다.
@@ -250,7 +294,7 @@ hooks:
 7. `design_*` Board 안에서 아래 규칙대로 **컴포넌트를 처음부터 조립**한다
 8. `export_shape`로 `design_*` Board를 내보내 시각 확인 → 이상 있으면 수정
 9. 결과를 반환한다
-   - 최소 포함값: 대상 `screen_id` / variant 목록, 생성/수정한 `design_*` Board 목록, `export_shape` 확인 결과
+   - 최소 포함값: `action`, 대상 `screen_id` / variant 목록, 생성/수정한 `design_*` Board 목록, `export_shape` 확인 결과
 
 #### 디자인 Board 배치 / 저장 규칙
 
@@ -379,13 +423,17 @@ Board(currentFrameWidth×56, fill:#1E3A5F, shadow:tabbar) + Flex(row, justifyCon
 - Text `resize()`만 하고 `growType` 미복원 금지
 - 아이콘 자리에 빈 도형만 놓는 것 금지
 
-### VOC에서 화면 관련 피드백이 왔을 때
-1. 피드백 내용을 확인한다
+### VOC / 업데이트에서 화면 관련 피드백이 왔을 때
+1. **기획자의 `[디자이너 가이드]`를 확인한다** — `action` 필드로 UPDATE/CREATE/혼합 여부를 파악한다.
 2. **`design_*` Board만 수정한다.** `wf_*`와 `desc_*`는 기획자의 영역이므로 절대 수정하지 않는다. VOC 반영이든 루프 A든 동일한 원칙이다.
-3. 기획자가 `wf_*`/`desc_*`를 먼저 업데이트한 상태에서, 디자이너는 해당 변경분을 `design_*`에 반영한다.
+3. **action에 따라 분기한다:**
+   - **UPDATE**: 기획자가 `wf_*`/`desc_*`를 먼저 업데이트한 상태이다. 기존 `design_*` Board를 찾아 변경분만 수정한다. 새 Board를 만들지 않는다.
+   - **CREATE**: 새 `design_*` Board를 생성한다 (루프 A-3 절차 적용).
+   - **UPDATE+CREATE**: UPDATE 대상은 기존 Board 수정, CREATE 대상은 새 Board 생성.
+   - **NO_CHANGE**: `design_*`는 건드리지 않고 종료한다. 단, 디자인 영향 없음 사유를 반환한다.
 4. `design_*`에 요소가 없으면 추가하고, 있으면 수정한다.
 5. **작업 후 반드시 `export_shape`로 수정한 `design_*` Board를 시각적으로 확인한다.** 요소가 실제로 보이는지 본인이 검증하고, 안 보이면 다시 작업한다. "했다"고 보고하고 실제로 안 된 것은 허용하지 않는다.
-6. 결과를 반환한다 — 어떤 `design_*` Board에 무엇을 추가/수정했는지 명시 + export_shape 확인 결과 포함
+6. 결과를 반환한다 — `action`, 어떤 `design_*` Board에 무엇을 추가/수정/생성했는지 명시 + export_shape 확인 결과 또는 디자인 영향 없음 사유 포함
 
 ## 결과물 저장
 - UX 리뷰: workspace/design/A-uiux-review.md

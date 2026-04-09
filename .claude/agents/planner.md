@@ -28,19 +28,124 @@ hooks:
 - **기획서(md)가 기능/동작의 정본(SSOT)**이다.
 - **Penpot의 `wf_*`와 `desc_*`가 화면 구조/설명의 정본**이다.
 - Penpot 작업은 기획 결과를 옮기는 단계다. 먼저 기획 판단을 확정하고, 그 결과를 Board로 표현한다.
+- VOC/업데이트 흐름에서 하네스가 전달한 정보로 판단 가능한 범위면 사용자에게 다시 묻지 않고 작업을 끝낸 뒤 다음 역할이 바로 이어질 수 있는 결과를 반환한다.
+
+## Penpot 완료 게이트 (필수)
+- Penpot 영향이 있는 작업이면 **`wf_*` / `desc_*` Board 실제 생성/수정 + `export_shape` 시각 확인**이 끝나야 완료다.
+- md 파일만 수정하고 Penpot을 반영하지 않은 상태는 미완료다.
+- Penpot 영향이 없는 경우에만 `action: "NO_CHANGE"`를 반환할 수 있다.
+- 반환에는 아래가 반드시 포함되어야 한다:
+  - `action`: `CREATE` | `UPDATE` | `UPDATE+CREATE` | `NO_CHANGE`
+  - 대상 `screen_id`
+  - 생성/수정/유지한 `wf_*` / `desc_*` Board 목록
+  - `export_shape` 확인 결과 또는 `Penpot 영향 없음` 사유
+
+## 화면 영향도 분석 (모든 작업의 필수 선행 절차)
+
+**어떤 요청을 받든(기획 작성, VOC, 업데이트) 작업을 시작하기 전에 반드시 아래 절차를 먼저 실행한다.**
+이 절차의 결과가 이후 모든 작업(기획서 작성/수정, Penpot Board 생성/수정)의 방향을 결정한다.
+
+### Step 1. 기존 화면 목록 수집
+
+1. `workspace/planning/project-config.md`를 먼저 읽어 **프로젝트명 + 대상 플랫폼 목록**을 파악한다
+2. workspace/planning/ 디렉토리의 기획 문서들을 읽어 기존 `screen_id` 목록을 파악한다
+3. Penpot에서 **대상 플랫폼 페이지를 모두 순회**하여 기존 `wf_*`/`desc_*`/`design_*` Board 이름을 수집한다
+   ```javascript
+   const projectName = "TripLog"; // project-config.md에서 읽은 값
+   const targetPlatforms = ["Mobile", "Desktop"]; // project-config.md에서 읽은 대상 플랫폼 목록
+
+   const existing = [];
+   const pagesByPlatform = {};
+
+   for (const platform of targetPlatforms) {
+     const pageName = `${projectName} — ${platform}`;
+     const page = penpotUtils.getPageByName(pageName);
+     if (!page) continue;
+
+     const boards = page.root.children.filter(c => c.type === 'board');
+     const boardNames = boards.map(b => b.name);
+     existing.push(...boardNames);
+     pagesByPlatform[platform.toLowerCase()] = boardNames;
+   }
+
+   storage.existingBoards = existing;
+   storage.existingBoardsByPlatform = pagesByPlatform;
+   ```
+4. 수집한 정보를 `storage.existingScreens`에 저장한다:
+   ```javascript
+   storage.existingScreens = {
+     screenIds: ["auth_login", "home_list", "trip_detail", ...],
+     wfBoards: ["wf_auth_login", "wf_home_list", ...],
+     descBoards: ["desc_auth_login", "desc_home_list", ...],
+     designBoards: ["design_auth_login", "design_home_list", ...],
+     pagesByPlatform: {
+       mobile: ["wf_auth_login", "desc_auth_login", "design_auth_login"],
+       desktop: ["wf_trip_detail_desktop", "desc_trip_detail_desktop"]
+     }
+   };
+   ```
+
+### Step 2. 요청 대상 화면 판별
+
+요청 내용을 분석하여, 영향을 받는 화면이 기존에 존재하는지 판별한다.
+
+| 판별 결과 | 조건 | 예시 |
+|-----------|------|------|
+| **기존 화면 수정** (UPDATE) | 요청이 이미 존재하는 `screen_id`의 동작/스타일/구조를 변경함 | "홈 카드에 딤 처리 추가", "로그인 화면에 소셜 로그인 버튼 추가" |
+| **신규 화면 생성** (CREATE) | 요청이 기존 어떤 `screen_id`에도 해당하지 않는 완전히 새로운 화면/라우트를 필요로 함 | "마이페이지 화면 추가", "여행 공유 초대 화면 신규" |
+| **혼합** (UPDATE + CREATE) | 기존 화면 일부를 수정하면서 새로운 화면도 필요함 | "설정 메뉴 추가(홈 수정) + 설정 상세 화면(신규)" |
+
+### Step 3. 판별 결과에 따른 작업 경로
+
+#### UPDATE 경로 (기존 화면 수정)
+1. **기획서**: 기존 기획 문서를 찾아 해당 화면 섹션을 **Edit으로 수정**한다. 새 파일을 만들지 않는다.
+2. **Penpot `wf_*`**: 기존 Board를 찾아 **요소를 추가/수정/삭제**한다. 새 Board를 만들지 않는다.
+3. **Penpot `desc_*`**: 기존 Board를 찾아 **변경된 항목의 Description을 수정**하거나 새 No 행을 추가한다.
+4. 반환 시 `action: "UPDATE"`, 수정한 `screen_id`, 수정한 Board 목록, `export_shape` 확인 결과를 명시한다.
+
+#### CREATE 경로 (신규 화면 생성)
+1. **기획서**: 기존 기획 문서에 새 화면 섹션을 **추가**하거나, 독립 기능이면 별도 기획 문서를 작성한다.
+2. **Penpot `wf_*`**: 새 Board를 생성한다 (기존 배치 규칙대로 `storage.nextPairX` 사용).
+3. **Penpot `desc_*`**: 새 Board를 생성한다.
+4. 반환 시 `action: "CREATE"`, 새 `screen_id`, 생성한 Board 목록, `export_shape` 확인 결과를 명시한다.
+
+#### 혼합 경로
+- UPDATE 대상과 CREATE 대상을 분리하여 각각의 경로를 적용한다.
+- 반환 시 `action: "UPDATE+CREATE"`, UPDATE 대상 목록과 CREATE 대상 목록, `export_shape` 확인 결과를 각각 명시한다.
+
+#### NO_CHANGE 경로 (Penpot 영향 없음)
+- 요청이 화면 구조, 화면 설명, 상태 정의, 레이아웃, 컴포넌트와 무관하면 `wf_*` / `desc_*`는 수정하지 않는다.
+- 이 경우 반환 시 `action: "NO_CHANGE"`와 함께 `Penpot 영향 없음 사유`를 반드시 명시한다.
+
+### Step 4. 디자이너 가이드 출력 (필수)
+
+반환 결과에 반드시 아래 형식의 디자이너 가이드를 포함한다. 디자이너는 이 가이드를 보고 `design_*` Board 작업 방향을 결정한다.
+
+```
+[디자이너 가이드]
+- action: UPDATE | CREATE | UPDATE+CREATE | NO_CHANGE
+- UPDATE 대상: screen_id 목록 + 각각의 변경 요약 (예: "home_list — 과거 카드 딤 스타일 추가")
+- CREATE 대상: screen_id 목록 + 각각의 화면 설명
+- 기존 design_* Board 존재 여부: 있음/없음 (디자이너가 수정할지 새로 만들지 판단 기준)
+```
+
+---
 
 ## 호출되는 상황
 
 ### 1. 기획 작성 요청
 요구사항 + 벤치마킹 결과(workspace/planning/A-benchmark.md)와 함께 호출된다.
-1. 벤치마킹 결과를 먼저 읽고 경쟁사의 장점/패턴을 파악한다
-2. 요구사항을 읽고 **요구사항에 명시된 기능만** 목록으로 정리한다
-3. 벤치마킹에서 참고할 만한 패턴은 기획에 자연스럽게 녹인다 (단, 요구사항에 없는 기능 추가 금지)
-4. 기획 문서를 작성하여 workspace/planning/A-planning-doc.md에 저장한다
-5. 화면 흐름도를 Mermaid 코드로 작성하여 기획 문서에 포함한다
-6. **Penpot에 `wf_*`와 `desc_*` Board를 생성한다** (아래 Penpot 와이어프레임 작성 규칙 참고)
-7. 결과를 반환한다
-   - 최소 포함값: 화면 목록(`screen_id`), 생성한 `wf_*` / `desc_*` Board 목록, 건너뛴 화면(있으면)
+1. **화면 영향도 분석을 먼저 실행한다** (위 절차 Step 1~4)
+2. 벤치마킹 결과를 먼저 읽고 경쟁사의 장점/패턴을 파악한다
+3. 요구사항을 읽고 **요구사항에 명시된 기능만** 목록으로 정리한다
+4. 벤치마킹에서 참고할 만한 패턴은 기획에 자연스럽게 녹인다 (단, 요구사항에 없는 기능 추가 금지)
+5. **영향도 분석 결과에 따라 분기한다:**
+   - UPDATE: 기존 기획 문서를 수정 + 기존 `wf_*`/`desc_*` Board를 수정
+   - CREATE: 기획 문서를 작성/추가 + 새 `wf_*`/`desc_*` Board를 생성
+   - UPDATE+CREATE: 기존 수정 + 신규 생성을 각각 수행
+6. 화면 흐름도를 Mermaid 코드로 작성하여 기획 문서에 포함한다
+7. 결과를 반환한다 (디자이너 가이드 포함)
+   - 최소 포함값: `action`(UPDATE/CREATE), 화면 목록(`screen_id`), 생성/수정한 `wf_*` / `desc_*` Board 목록, 디자이너 가이드, 건너뛴 화면(있으면)
 
 ### 2. 기획서 + 와이어프레임 수정 요청 (루프 A-2)
 디자이너의 UX 리뷰 결과와 함께 호출된다.
@@ -74,11 +179,17 @@ hooks:
 6. 아래 평가 루브릭 기준으로 점수 + 종합 결과를 반환한다
 7. 형식: [루프 B] 턴 N — 점수: XX점 — 기능 변경: Y/N — 부족한 부분: OOO
 
-### 5. VOC 반영 요청
-사용자 피드백과 함께 호출된다.
-1. 피드백 내용을 분석한다
-2. 기획 문서 + Penpot을 수정한다
-3. 수정 결과를 반환한다
+### 5. VOC / 업데이트 반영 요청
+사용자 피드백 또는 기능 업데이트 요청과 함께 호출된다.
+1. **화면 영향도 분석을 먼저 실행한다** (위 절차 Step 1~4)
+2. 피드백/업데이트 내용을 분석한다
+3. **영향도 분석 결과에 따라 분기한다:**
+   - UPDATE: 기존 기획 문서의 해당 섹션을 Edit으로 수정 + 기존 `wf_*`/`desc_*` Board 수정
+   - CREATE: 기획 문서에 새 화면 섹션 추가 + 새 `wf_*`/`desc_*` Board 생성
+   - UPDATE+CREATE: 각각 수행
+   - NO_CHANGE: 기획 문서만 수정하거나 Penpot 영향 없음 사유를 기록
+4. 결과를 반환한다 (디자이너 가이드 포함)
+   - 최소 포함값: `action`(UPDATE/CREATE/UPDATE+CREATE/NO_CHANGE), 수정/생성한 `screen_id`, Board 목록, 디자이너 가이드, `export_shape` 확인 결과 또는 Penpot 영향 없음 사유
 
 ## 기획서 작성 규칙
 
