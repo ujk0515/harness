@@ -441,6 +441,78 @@ storage.layout = {
 - 카드 그리드는 반드시 `gridCards`로 배치. 수동으로 x좌표 계산하지 않는다.
 - 타이틀/서브타이틀은 반드시 `centerX` 또는 `centerTextInCard`로 중앙 정렬한다.
 
+### Penpot 요소 생성 코드 패턴 (필수 — 이 패턴만 사용)
+
+**디자인 요소를 만들 때 아래 패턴을 반드시 따른다. 자기만의 방식으로 만들지 않는다.**
+
+#### 텍스트 생성 (가장 중요)
+```javascript
+// ✅ 올바른 텍스트 생성 — 반드시 resize + growType 세트
+const text = penpot.createText('장소 추가');
+text.fontSize = 18;
+text.fontWeight = '700';
+text.fills = [{ fillColor: '#1E3A5F', fillOpacity: 1 }];
+text.resize(300, 20);              // ← 너비를 반드시 잡는다
+text.growType = 'auto-height';     // ← 높이만 자동
+board.appendChild(text);
+text.x = bx + 16; text.y = by + 16;
+
+// ❌ 절대 하지 않는 것
+const bad = penpot.createText('텍스트');
+// resize 안 하면 너비 0 → 한 글자씩 줄바꿈 → 깨짐
+```
+
+**규칙: `penpot.createText()` 후에는 반드시 `resize(너비, 높이)` + `growType = 'auto-height'`를 세트로 호출한다. 예외 없음.**
+
+#### 입력 필드
+```javascript
+const input = penpot.createRectangle();
+input.resize(358, 48);
+input.fills = [{ fillColor: '#F8FAFC', fillOpacity: 1 }];
+input.borderRadius = 10;
+input.strokes = [{ strokeColor: '#E2E8F0', strokeWidth: 1.5, strokeAlignment: 'outer' }];
+board.appendChild(input);
+input.x = bx + 16; input.y = by + 102;
+
+// placeholder 텍스트
+const ph = penpot.createText('예: 에펠탑');
+ph.fontSize = 15;
+ph.fills = [{ fillColor: '#94A3B8', fillOpacity: 1 }];
+ph.resize(300, 20); ph.growType = 'auto-height';  // ← 반드시 resize
+board.appendChild(ph);
+ph.x = input.x + 16; ph.y = input.y + 14;
+```
+
+#### 버튼
+```javascript
+const btn = penpot.createRectangle();
+btn.resize(358, 48);
+btn.fills = [{ fillColor: '#2563EB', fillOpacity: 1 }];
+btn.borderRadius = 12;
+btn.shadows = [{ color: { r: 37, g: 99, b: 235, opacity: 0.25 }, offsetX: 0, offsetY: 4, blur: 12, spread: 0 }];
+board.appendChild(btn);
+btn.x = bx + 16; btn.y = by + 500;
+
+const btnText = penpot.createText('저장');
+btnText.fontSize = 13; btnText.fontWeight = '500';
+btnText.fills = [{ fillColor: '#FFFFFF', fillOpacity: 1 }];
+btnText.resize(60, 16); btnText.growType = 'auto-height';
+board.appendChild(btnText);
+btnText.x = btn.x + (btn.width - 60) / 2;  // 중앙 정렬
+btnText.y = btn.y + 16;
+```
+
+#### Flex Layout 금지 규칙
+- **design_* Board에 Flex Layout을 사용하지 않는다.** 절대 좌표 배치만 사용한다.
+- Flex를 쓰면 요소 위치가 예측 불가능하게 되고, 수정할 때마다 깨진다.
+- `board.appendChild(shape)` 후 `shape.x`, `shape.y`로 직접 배치한다.
+- `addFlexLayout()` 호출 금지.
+
+#### 기존 design_* 참조 규칙
+- 새 design_* Board를 만들기 전에 **같은 페이지의 기존 design_* Board를 export_shape로 확인**한다.
+- 기존 보드의 레이아웃 패턴(TopBar 높이, 필드 간격, 버튼 위치)을 그대로 따른다.
+- 자기만의 새로운 레이아웃을 만들지 않는다. 기존 패턴을 복사한다.
+
 ### 정렬 검증 (작업 완료 전 필수)
 
 모든 `design_*` Board 작업 완료 후, export_shape 전에 아래 검증 코드를 실행한다:
