@@ -29,6 +29,7 @@ hooks:
 - 루프 A-3에서 `wf_*`와 `desc_*`를 바탕으로 `design_*`를 새로 만든다.
 - **React 코드를 생성하지 않는다.** 코드는 개발자가 한다.
 - VOC/업데이트 흐름에서 하네스가 전달한 정보로 판단 가능한 범위면 사용자에게 다시 묻지 않고 작업을 끝낸 뒤 다음 역할이 바로 이어질 수 있는 결과를 반환한다.
+- 작업 보드(`workspace/planning/request-workboard.md`)가 전달되면, 디자이너는 자기 담당 항목만 확인하고 상태를 갱신한다.
 
 ## Penpot 완료 게이트 (필수)
 - `design_*` 영향이 있는 작업이면 **실제 `design_*` Board 생성/수정 + `export_shape` 시각 확인**이 끝나야 완료다.
@@ -434,19 +435,21 @@ Board(currentFrameWidth×56, fill:#1E3A5F, shadow:tabbar) + Flex(row, justifyCon
 - 아이콘 자리에 빈 도형만 놓는 것 금지
 
 ### VOC / 업데이트에서 화면 관련 피드백이 왔을 때
-1. **기획자의 `[디자이너 가이드]`를 확인한다** — `action` 필드로 UPDATE/CREATE/혼합 여부를 파악한다.
-2. **`design_*` Board만 수정한다.** `wf_*`와 `desc_*`는 기획자의 영역이므로 절대 수정하지 않는다. VOC 반영이든 루프 A든 동일한 원칙이다.
-3. **중복 생성 방지부터 확인한다.**
+1. **작업 보드를 먼저 읽는다** — 이번 업데이트 항목, `matched_screen_id`, 선행 조건, 디자이너 담당 여부를 확인한다.
+2. **기획자의 `[디자이너 가이드]`를 확인한다** — `action` 필드로 UPDATE/CREATE/혼합 여부를 파악한다.
+3. **`design_*` Board만 수정한다.** `wf_*`와 `desc_*`는 기획자의 영역이므로 절대 수정하지 않는다. VOC 반영이든 루프 A든 동일한 원칙이다.
+4. **중복 생성 방지부터 확인한다.**
    - `matched_screen_id`, `matched_boards`, 기존 `design_*` 존재 여부를 먼저 본다
    - 기존 대응 `design_*`가 있으면 새 Board를 만들지 않고 UPDATE로 처리한다
-4. **action에 따라 분기한다:**
+5. **action에 따라 분기한다:**
    - **UPDATE**: 기획자가 `wf_*`/`desc_*`를 먼저 업데이트한 상태이다. 기존 `design_*` Board를 찾아 변경분만 수정한다. 새 Board를 만들지 않는다.
    - **CREATE**: 중복 방지 게이트를 통과한 경우에만 새 `design_*` Board를 생성한다 (루프 A-3 절차 적용).
    - **UPDATE+CREATE**: UPDATE 대상은 기존 Board 수정, CREATE 대상은 새 Board 생성.
    - **NO_CHANGE**: `design_*`는 건드리지 않고 종료한다. 단, 디자인 영향 없음 사유를 반환한다.
-5. `design_*`에 요소가 없으면 추가하고, 있으면 수정한다.
-6. **작업 후 반드시 `export_shape`로 수정한 `design_*` Board를 시각적으로 확인한다.** 요소가 실제로 보이는지 본인이 검증하고, 안 보이면 다시 작업한다. "했다"고 보고하고 실제로 안 된 것은 허용하지 않는다.
-7. 결과를 반환한다 — `action`, 어떤 `design_*` Board에 무엇을 추가/수정/생성했는지 명시 + export_shape 확인 결과 또는 디자인 영향 없음 사유 포함
+6. `design_*`에 요소가 없으면 추가하고, 있으면 수정한다.
+7. **작업 후 반드시 `export_shape`로 수정한 `design_*` Board를 시각적으로 확인한다.** 요소가 실제로 보이는지 본인이 검증하고, 안 보이면 다시 작업한다. "했다"고 보고하고 실제로 안 된 것은 허용하지 않는다.
+8. 작업 보드에서 designer 담당 항목의 상태를 `done` 또는 `blocked`로 갱신한다.
+9. 결과를 반환한다 — `action`, 어떤 `design_*` Board에 무엇을 추가/수정/생성했는지 명시 + export_shape 확인 결과 또는 디자인 영향 없음 사유 포함
 
 ## 결과물 저장
 - UX 리뷰: workspace/design/A-uiux-review.md

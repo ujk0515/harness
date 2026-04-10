@@ -125,9 +125,48 @@
 #### 흐름
 1. 하네스가 피드백 + 질문을 전달한다
 2. **사용자가 답할 때까지 멈춘다. 절대 자동 진행하지 않는다.**
-3. 사용자가 답하면 → 벤치마킹 + 루프 A 시작
+3. 사용자가 답하면 → **요청 분해 + 작업 보드 생성** → 벤치마킹 + 루프 A 시작
 
 추출한 설정은 workspace/planning/project-config.md에 저장하고, 모든 에이전트 호출 시 참조한다.
+
+### 요청 분해 + 작업 보드 생성 (공통 선행 단계)
+루프를 시작하기 전에, 하네스는 사용자 요청을 **작업 단위**로 먼저 쪼갠다.
+이 단계는 신규 기획 요청과 VOC/업데이트 요청 모두에 공통으로 적용한다.
+
+#### 분해 원칙
+- 문장 단위가 아니라 **화면/기능/변경 단위**로 나눈다.
+- 하나의 작업 항목은 한 번에 하나의 주요 UI/기능 변화만 담는다.
+- 기존 화면 수정이면 기존 `screen_id`에 매핑하고, 신규 화면이면 새 `screen_id` 후보를 적는다.
+- 각 항목마다 변경 유형, 필수 에이전트, 선행 조건, 완료 조건을 확정한다.
+
+#### 신규 화면 생성 트리거
+- 아래를 만족하면 하네스는 해당 항목을 **신규 화면 후보(CREATE)** 로 본다.
+  - 기존 어떤 `screen_id`에도 자연스럽게 매핑되지 않음
+  - 새 route / 새 view / 새 독립 flow / 새 `screen_id`가 필요함
+- 이 경우 하네스는 작업 보드에 `matched_screen_id = 없음`, `변경 유형 = 화면 구조/기능 변경`, `비고 = CREATE 후보 사유`를 먼저 기록한다.
+- 이후 planner가 이 후보를 검토해 최종적으로 `CREATE` 또는 `UPDATE+CREATE`를 확정한다.
+- `CREATE`가 확정되면 순서는 아래와 같다:
+  - planner: 기획서 새 화면 섹션 + 새 `wf_*` / `desc_*` 생성
+  - designer: planner 가이드의 `action: CREATE`를 받아 새 `design_*` 생성
+  - developer: 그 뒤 코드 구현
+- 신규 화면 후보라도 기존 화면 수정으로 흡수 가능하면 `UPDATE`로 되돌린다.
+
+#### 작업 보드 필수 컬럼
+- `item_id`
+- `요청 항목`
+- `matched_screen_id`
+- `변경 유형`
+- `필수 에이전트`
+- `선행 조건`
+- `완료 조건`
+- `상태` (`todo`, `in_progress`, `done`, `blocked`, `skipped`)
+- `비고`
+
+#### 생성 규칙
+- 하네스는 요청 분해 결과를 `workspace/planning/request-workboard.md`에 저장한다.
+- 신규 요청이면 새 보드를 만들고, VOC/업데이트면 기존 보드를 읽은 뒤 영향을 받는 항목을 갱신하거나 새 항목을 추가한다.
+- planner 호출 전, 하네스는 이 보드가 존재하고 최신 요청이 반영되었는지 먼저 확인한다.
+- 이후 에이전트 호출 시 `request-workboard.md`를 함께 전달한다.
 
 ### Penpot / 인프라 사전 확인
 루프 A 시작 전, 하네스는 Penpot 사용 준비 상태를 먼저 확인한다.
@@ -153,6 +192,7 @@
 | 산출물 | 경로 | 담당 | 비고 |
 |--------|------|------|------|
 | 프로젝트 설정 | workspace/planning/project-config.md | 하네스 | 접두사 없음 |
+| 요청 작업 보드 | workspace/planning/request-workboard.md | 하네스 | 신규/업데이트 공통 작업 분해 보드 |
 | 벤치마킹 | workspace/planning/A-benchmark.md | 하네스 | 사전 단계 |
 | 기획서 | workspace/planning/A-planning-doc.md | 기획자 | |
 | Penpot 화면 와이어프레임 | Penpot 프로젝트 내 `wf_[screen_id]` Board | 기획자 | 화면 구조 정본 |
@@ -262,13 +302,15 @@
 5. 이 파일을 기획자 호출 시 함께 전달한다
 
 ### 루프 A-1: 기획서 + Penpot 와이어프레임 작성 + 디자이너 UX 리뷰
-1. Agent(planner) 호출: "요구사항: {X}. 벤치마킹: workspace/planning/A-benchmark.md. 기획서 작성 + Penpot 와이어프레임 생성해. 각 화면마다 `wf_[id]` Board와 `desc_[id]` Board를 따로 만들고, 라벨/디스크립션/상태별 화면을 포함해"
+1. Agent(planner) 호출: "요구사항: {X}. 작업 보드: workspace/planning/request-workboard.md. 벤치마킹: workspace/planning/A-benchmark.md. 기획서 작성 + Penpot 와이어프레임 생성해. 각 화면마다 `wf_[id]` Board와 `desc_[id]` Board를 따로 만들고, 라벨/디스크립션/상태별 화면을 포함해"
+   - 작업 보드에 `matched_screen_id = 없음`이고 CREATE 후보 사유가 있으면 planner는 신규 화면 여부를 먼저 확정한다
+   - 신규 화면으로 확정되면 새 `wf_*` / `desc_*`를 만들고, 디자이너에게 `action: CREATE` 가이드를 넘긴다
 2. Agent(designer) 호출: "기획서: {경로}. `wf_*`와 `desc_*`를 확인해서 UX 관점으로 리뷰해. 개선 필요 여부 판단해"
 3. 개선사항 없음 → 루프 A-2 건너뛰고 A-3으로
 4. 개선사항 있음 → 루프 A-2로
 
 ### 루프 A-2: 디자이너 ↔ 기획자 화면 개선
-1. Agent(planner) 호출: "디자이너 리뷰: {경로}. 반영하여 기획서 수정 + `wf_*` + `desc_*` 수정해"
+1. Agent(planner) 호출: "디자이너 리뷰: {경로}. 작업 보드: workspace/planning/request-workboard.md. 반영하여 기획서 수정 + `wf_*` + `desc_*` 수정해"
 2. Agent(designer) 호출: "기획서 + `wf_*` + `desc_*`를 재검토해. 점수 반환해"
 3. 통과 기준 미만 → 1번 반복
 4. 통과 기준 이상 → 루프 A-2 완료
@@ -281,7 +323,7 @@
 ### 루프 B: 전체 기획 리뷰 (개발자 + QA + 기획자)
 1. Agent(developer) 호출: "기획서: {경로}. `wf_*`, `desc_*`, `design_*`를 확인해. 기술 검토 + 실현 가능성 의견 내"
 2. Agent(qa) 호출: "기획서: {경로}. `wf_*`, `desc_*`, `design_*`를 확인해. 기획 검토 + 테스트 관점 의견 내"
-3. Agent(planner) 호출: "개발자 의견: {경로}, QA 의견: {경로}. 종합하여 타협점 정리. 기획서 최종 수정 + 필요시 `wf_*` + `desc_*` 수정. 변경 내용을 '기능 변경', '문구/구조 정리', '`wf_*`/`desc_*` 변경 여부'로 분류해서 반환해. 점수도 반환해"
+3. Agent(planner) 호출: "개발자 의견: {경로}, QA 의견: {경로}. 작업 보드: workspace/planning/request-workboard.md. 종합하여 타협점 정리. 기획서 최종 수정 + 필요시 `wf_*` + `desc_*` 수정. 변경 내용을 '기능 변경', '문구/구조 정리', '`wf_*`/`desc_*` 변경 여부'로 분류해서 반환해. 점수도 반환해"
 4. 기획자 변경 내용 확인:
    - `wf_*` / `desc_*` 변경 있음 → Agent(designer) 호출: "변경된 기획서 + `wf_*` + `desc_*`를 기준으로 영향받는 `design_*`만 재동기화해. 변경 없는 `design_*`는 건드리지 마"
    - 기능 변경 있음 → Agent(developer) 호출: "기획자 수정 내역: {변경분}. 기술적으로 문제 없는지 확인해"
@@ -292,21 +334,21 @@
    - 루프 B 완료
 
 ### 루프 C: 개발 + 테스트케이스 작성 (동시 진행)
-1. Agent(developer) 호출: "project-config.md + 기획서: {경로}. `wf_*`, `desc_*`, `design_*`를 참조하여 프론트엔드 개발해 (workspace/development/). 서버 스택이 있으면 workspace/server/에 서버도 개발해"
-2. Agent(qa) 호출: "project-config.md + 기획서: {경로}. `wf_*`, `desc_*`, `design_*`를 확인해. 테스트케이스 작성해 (프론트 + 서버 API 둘 다)"
+1. Agent(developer) 호출: "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md. `wf_*`, `desc_*`, `design_*`를 참조하여 프론트엔드 개발해 (workspace/development/). 서버 스택이 있으면 workspace/server/에 서버도 개발해"
+2. Agent(qa) 호출: "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md. `wf_*`, `desc_*`, `design_*`를 확인해. 테스트케이스 작성해 (프론트 + 서버 API 둘 다)"
 3. Agent(secretary) 호출: "루프 C 완료 기록. 개발 산출물과 테스트케이스 경로를 기준으로 이번 루프 요약을 agent-log에 기록해"
 
 ### 루프 D: 개발 ↔ 검증
-1. Agent(qa) 호출: "project-config.md + 기획서 + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로}. 코드 정적 분석으로 검증해"
-2. Agent(tester) 호출: "project-config.md + 기획서 + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로}. Playwright로 브라우저 실행 테스트해"
+1. Agent(qa) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로}. 코드 정적 분석으로 검증해"
+2. Agent(tester) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로}. Playwright로 브라우저 실행 테스트해"
 3. QA(정적 분석) + 테스터(브라우저 실행) 점수 종합 (둘 중 낮은 점수 기준)
 4. 통과 기준 미만 → **위 `이슈 분류 / 라우팅 규약`의 `[분류]` 값 기준으로 분기한다**
    - `기획 문제` → Agent(planner) 수정 → `wf_*` / `desc_*` 영향 있으면 Agent(designer)로 `design_*` 재동기화 → 루프 C-1번으로
    - `화면 문제` → Agent(designer) 수정 후 필요 시 Agent(planner) 확인 → 루프 C-1번으로
    - `동작 오류` → Agent(developer) 수정 → 5번으로
 5. **재검증 (턴 2 이후):** 하네스가 이전 이슈 목록 + 개발자 수정 내역을 함께 전달한다
-   - Agent(qa) 호출: "project-config.md + 기획서 + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분}. 수정된 부분 확인 + 회귀 없는지 체크해"
-   - Agent(tester) 호출: "project-config.md + 기획서 + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분}. 수정된 부분 Playwright로 재테스트 + 기존 PASS 항목 회귀 체크해"
+   - Agent(qa) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분}. 수정된 부분 확인 + 회귀 없는지 체크해"
+   - Agent(tester) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분}. 수정된 부분 Playwright로 재테스트 + 기존 PASS 항목 회귀 체크해"
    - 3번으로
 6. 통과 기준 이상:
    - Agent(secretary) 호출: "루프 D 완료 기록. QA/테스터 점수와 미해결 이슈를 기준으로 이번 루프 요약을 agent-log에 기록해"
@@ -332,8 +374,18 @@
 
 사용자 VOC가 들어오면 아래 순서를 **자동으로 전부** 실행한다. 중간에 사용자에게 묻지 않는다.
 
+VOC/업데이트도 먼저 **요청 분해 + 작업 보드 갱신**을 수행한 뒤 라우팅한다.
+
 하네스는 먼저 변경 유형을 판별하고, 그 결과에 따라 **필수 참여 에이전트만** 자동으로 호출한다.
 하네스가 판단 가능한 범위면 사용자에게 다시 묻지 않고 다음 역할로 넘긴다.
+
+### VOC 첫 호출 규칙
+- 요청에 **화면에서 보이는 변경(UI 구조, 상태, 레이아웃, 스타일, 문구)** 이 하나라도 포함되면 **첫 호출은 반드시 planner**다.
+- 디자이너는 planner가 기획서 + `wf_*` / `desc_*`를 반영한 뒤에만 호출한다.
+- developer는 planner/designer 선행 완료 게이트를 통과한 뒤에만 호출한다.
+- **developer가 첫 호출로 허용되는 경우는 코드 로직만 변경인 경우뿐이다.**
+- QA와 tester는 VOC/업데이트의 첫 호출 대상이 아니다.
+- 복합 요청이면 세부 항목 중 하나라도 UI-visible 변경이 있으면 planner first 규칙을 따른다.
 
 ### 변경 유형별 기본 라우팅
 
@@ -355,6 +407,7 @@
 - planner/designer/developer/QA/tester는 **자기 산출물이 생기면 다음 필수 역할로 바로 넘길 수 있는 형태로 반환**한다
 - 업데이트 흐름에서 "검토 후 진행할까요?", "다음 역할 넘길까요?" 같은 질문은 금지한다
 - 하네스가 외부 의존성, 요구사항 모호성, 기술적 불가능성을 발견한 경우에만 사용자에게 다시 묻는다
+- 상위 라우터는 UI-visible 변경 요청을 developer에게 직접 넘기지 않는다. 먼저 planner가 변경 화면과 `screen_id`를 확정해야 한다.
 
 ### 선행 완료 게이트
 - 화면에서 보이는 변경(UI 구조, 상태, 문구, 레이아웃, 스타일)이 있으면 **planner의 기획서 + `wf_*` / `desc_*` 반영이 먼저 완료**되어야 한다.
@@ -364,12 +417,14 @@
 
 ### 기본 진행 순서
 1. **planner** → 기획서 수정 + 필요 시 `wf_*` / `desc_*` 생성·수정
+   - `matched_screen_id = 없음`이고 planner가 CREATE를 확정하면 이 단계에서 새 화면 정의와 새 `wf_*` / `desc_*`를 만든다
 2. **designer** → 아래 중 하나라도 해당하면 `design_*` 생성·수정
    - `wf_*` / `desc_*`가 새로 생성되거나 수정됨
    - 기획서에서 화면의 동작/UI/레이아웃/요소가 변경됨
    - 기존 `design_*`에 반영 안 된 변경이 있음
    - **판단 기준: 사용자가 화면에서 보는 것이 바뀌면 디자이너가 들어간다.** 서버만 바뀌고 화면이 안 바뀌는 경우만 제외.
    - 디자이너는 planner가 기획서/`desc_*`에 명시한 상태(empty, loading, error, disabled)와 인터랙션(모달, 서랍, 토스트, 드롭다운)만 디자인한다.
+   - planner가 `action: CREATE`를 넘기면 새 `design_*`를 생성한다
 3. **developer** → planner/designer 선행 완료 게이트를 통과한 뒤 코드 구현/수정
 4. **QA** → 테스트케이스/스펙 영향이 있으면 TC 추가/수정 또는 정적 검증
 5. **tester** → 코드가 변경되면 Playwright 검증 (경량 변경이면 스모크/회귀, 일반 변경이면 전체 검증)
