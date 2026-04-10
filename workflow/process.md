@@ -149,6 +149,9 @@
   - planner: 기획서 새 화면 섹션 + 새 `wf_*` / `desc_*` 생성
   - designer: planner 가이드의 `action: CREATE`를 받아 새 `design_*` 생성
   - developer: 그 뒤 코드 구현
+  - QA: 신규 화면 기준 테스트케이스 작성/수정 + 정적 검증
+  - tester: 신규 화면 스모크/브라우저 실행 검증
+  - secretary: 신규 화면 생성 이력과 산출물 반영 상태 기록
 - 신규 화면 후보라도 기존 화면 수정으로 흡수 가능하면 `UPDATE`로 되돌린다.
 
 #### 작업 보드 필수 컬럼
@@ -305,6 +308,7 @@
 1. Agent(planner) 호출: "요구사항: {X}. 작업 보드: workspace/planning/request-workboard.md. 벤치마킹: workspace/planning/A-benchmark.md. 기획서 작성 + Penpot 와이어프레임 생성해. 각 화면마다 `wf_[id]` Board와 `desc_[id]` Board를 따로 만들고, 라벨/디스크립션/상태별 화면을 포함해"
    - 작업 보드에 `matched_screen_id = 없음`이고 CREATE 후보 사유가 있으면 planner는 신규 화면 여부를 먼저 확정한다
    - 신규 화면으로 확정되면 새 `wf_*` / `desc_*`를 만들고, 디자이너에게 `action: CREATE` 가이드를 넘긴다
+   - 신규 화면으로 확정된 항목도 루프 A-3 이후 일반 화면과 동일하게 `developer → QA/tester → secretary` 흐름으로 이어진다
 2. Agent(designer) 호출: "기획서: {경로}. `wf_*`와 `desc_*`를 확인해서 UX 관점으로 리뷰해. 개선 필요 여부 판단해"
 3. 개선사항 없음 → 루프 A-2 건너뛰고 A-3으로
 4. 개선사항 있음 → 루프 A-2로
@@ -378,6 +382,7 @@ VOC/업데이트도 먼저 **요청 분해 + 작업 보드 갱신**을 수행한
 
 하네스는 먼저 변경 유형을 판별하고, 그 결과에 따라 **필수 참여 에이전트만** 자동으로 호출한다.
 하네스가 판단 가능한 범위면 사용자에게 다시 묻지 않고 다음 역할로 넘긴다.
+업데이트 항목이 기존 화면 수정이 아니라 신규 화면 생성으로 확정되면, 해당 항목은 VOC라 하더라도 `planner → designer → developer → QA/tester → secretary` 순서의 신규 화면 생성 흐름을 그대로 따른다.
 
 ### VOC 첫 호출 규칙
 - 요청에 **화면에서 보이는 변경(UI 구조, 상태, 레이아웃, 스타일, 문구)** 이 하나라도 포함되면 **첫 호출은 반드시 planner**다.

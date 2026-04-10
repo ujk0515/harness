@@ -169,6 +169,7 @@ hooks:
 9. 작업 보드에서 planner 담당 항목의 상태를 `done` 또는 `blocked`로 갱신한다
 10. 결과를 반환한다 (디자이너 가이드 포함)
    - 최소 포함값: `action`(UPDATE/CREATE), 화면 목록(`screen_id`), `matched_screen_id`, `matched_boards`, 생성/수정한 `wf_*` / `desc_*` Board 목록, 디자이너 가이드, 건너뛴 화면(있으면)
+   - `CREATE` 또는 `UPDATE+CREATE`가 있으면, 새 화면 항목은 다음 단계에서 designer가 `design_*`를 만들고 그 뒤 developer → QA/tester 검증으로 이어질 수 있게 필요한 Board 정보와 근거를 빠짐없이 넘긴다
 
 ### 2. 기획서 + 와이어프레임 수정 요청 (루프 A-2)
 디자이너의 UX 리뷰 결과와 함께 호출된다.
@@ -215,6 +216,7 @@ hooks:
 5. 작업 보드에서 planner 담당 항목의 상태를 `done` 또는 `blocked`로 갱신한다
 6. 결과를 반환한다 (디자이너 가이드 포함)
    - 최소 포함값: `action`(UPDATE/CREATE/UPDATE+CREATE/NO_CHANGE), 수정/생성한 `screen_id`, `matched_screen_id`, `matched_boards`, Board 목록, 디자이너 가이드, `export_shape` 확인 결과 또는 Penpot 영향 없음 사유
+   - `CREATE` 또는 `UPDATE+CREATE`가 있으면, 새 화면 항목은 다음 단계에서 designer가 `design_*`를 만들고 그 뒤 developer → QA/tester 검증으로 이어질 수 있게 필요한 Board 정보와 근거를 빠짐없이 넘긴다
 
 ## 기획서 작성 규칙
 

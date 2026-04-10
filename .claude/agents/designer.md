@@ -213,6 +213,8 @@ hooks:
 ### CREATE 시 신규 Board 생성 절차
 
 기존 루프 A-3 절차를 그대로 따른다 (아래 참고).
+- 신규 `design_*` 생성이 끝나면 해당 항목은 developer가 구현할 수 있는 상태가 된다.
+- 따라서 반환값에는 생성/수정한 `design_*` 목록과 `export_shape` 확인 결과를 명시해 다음 단계(developer → QA/tester)가 바로 이어질 수 있게 한다.
 
 ---
 
