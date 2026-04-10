@@ -434,7 +434,7 @@ VOC/업데이트도 먼저 **요청 분해 + 작업 보드 갱신**을 수행한
 
 ### 선행 완료 게이트
 - 화면에서 보이는 변경(UI 구조, 상태, 문구, 레이아웃, 스타일)이 있으면 **planner의 기획서 + `wf_*` / `desc_*` 반영이 먼저 완료**되어야 한다.
-- 화면에서 보이는 변경이 있고 `design_*`에 영향이 있으면 **designer의 `design_*` 반영 + `export_shape` 확인이 먼저 완료**되어야 한다.
+- planner가 `designer_required = Y`를 반환했거나, 화면에서 보이는 변경이 있고 `design_*`에 영향이 있으면 **designer의 `design_*` 반영 + `export_shape` 확인이 먼저 완료**되어야 한다.
 - 위 두 조건이 충족되기 전에는 developer를 호출하지 않는다.
 - developer는 planner/designer 산출물이 확정된 뒤 그 결과를 코드로 반영하는 순서를 따른다.
 
@@ -442,6 +442,7 @@ VOC/업데이트도 먼저 **요청 분해 + 작업 보드 갱신**을 수행한
 1. **planner** → 기획서 수정 + 필요 시 `wf_*` / `desc_*` 생성·수정
    - `matched_screen_id = 없음`이고 planner가 CREATE를 확정하면 이 단계에서 새 화면 정의와 새 `wf_*` / `desc_*`를 만든다
 2. **designer** → 아래 중 하나라도 해당하면 `design_*` 생성·수정
+   - planner 반환에 `designer_required = Y`가 명시됨
    - `wf_*` / `desc_*`가 새로 생성되거나 수정됨
    - 기획서에서 화면의 동작/UI/레이아웃/요소가 변경됨
    - 기존 `design_*`에 반영 안 된 변경이 있음

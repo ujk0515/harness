@@ -36,9 +36,20 @@ hooks:
 - Penpot 영향이 없는 경우에만 `action: "NO_CHANGE"`를 반환할 수 있다.
 - 반환에는 아래가 반드시 포함되어야 한다:
   - `action`: `CREATE` | `UPDATE` | `UPDATE+CREATE` | `NO_CHANGE`
+  - `designer_required`: `Y` | `N`
+  - `design_reason`: 디자이너가 왜 필요한지 또는 왜 불필요한지
+  - `design_target_boards`: 수정/생성 대상 `design_*` Board 목록
   - 대상 `screen_id`
   - 생성/수정/유지한 `wf_*` / `desc_*` Board 목록
   - `export_shape` 확인 결과 또는 `Penpot 영향 없음` 사유
+
+## 디자이너 참여 판정 규칙 (필수)
+- 아래 중 하나라도 해당하면 `designer_required = Y`다.
+  - 사용자가 화면에서 보게 되는 UI 구조, 상태, 레이아웃, 스타일, 문구, 지도, 마커, 검색 결과, 오버레이가 바뀜
+  - `wf_*` 또는 `desc_*`를 새로 만들거나 수정함
+  - 기존 `design_*`에 반영되지 않은 컴포넌트/상태/시각 요소가 생김
+- 서버/API만 바뀌고 사용자가 보는 화면이 그대로면 `designer_required = N`일 수 있다.
+- `designer_required = N`일 때도 그 이유를 `design_reason`에 반드시 명시한다.
 
 ## 화면 영향도 분석 (모든 작업의 필수 선행 절차)
 
@@ -140,6 +151,9 @@ hooks:
 ```
 [디자이너 가이드]
 - action: UPDATE | CREATE | UPDATE+CREATE | NO_CHANGE
+- designer_required: Y | N
+- design_reason: 왜 디자이너가 필요한지 또는 왜 불필요한지
+- design_target_boards: 수정/생성 대상 `design_*` Board 목록
 - matched_screen_id: 기존 화면으로 매칭된 `screen_id` 목록 (없으면 빈 배열)
 - match_basis: 어떤 근거로 해당 `screen_id`에 매칭했는지 (`기획서`, `wf_*`, `desc_*`, 기존 route/view/component`)
 - matched_boards: 수정 대상으로 판단한 기존 `wf_*` / `desc_*` / `design_*` Board 목록
@@ -168,7 +182,7 @@ hooks:
 8. 화면 흐름도를 Mermaid 코드로 작성하여 기획 문서에 포함한다
 9. 작업 보드에서 planner 담당 항목의 상태를 `done` 또는 `blocked`로 갱신한다
 10. 결과를 반환한다 (디자이너 가이드 포함)
-   - 최소 포함값: `action`(UPDATE/CREATE), 화면 목록(`screen_id`), `matched_screen_id`, `matched_boards`, 생성/수정한 `wf_*` / `desc_*` Board 목록, 디자이너 가이드, 건너뛴 화면(있으면)
+   - 최소 포함값: `action`(UPDATE/CREATE), `designer_required`, `design_reason`, `design_target_boards`, 화면 목록(`screen_id`), `matched_screen_id`, `matched_boards`, 생성/수정한 `wf_*` / `desc_*` Board 목록, 디자이너 가이드, 건너뛴 화면(있으면)
    - `CREATE` 또는 `UPDATE+CREATE`가 있으면, 새 화면 항목은 다음 단계에서 designer가 `design_*`를 만들고 그 뒤 developer → QA/tester 검증으로 이어질 수 있게 필요한 Board 정보와 근거를 빠짐없이 넘긴다
 
 ### 2. 기획서 + 와이어프레임 수정 요청 (루프 A-2)
@@ -215,7 +229,7 @@ hooks:
    - NO_CHANGE: 기획 문서만 수정하거나 Penpot 영향 없음 사유를 기록
 5. 작업 보드에서 planner 담당 항목의 상태를 `done` 또는 `blocked`로 갱신한다
 6. 결과를 반환한다 (디자이너 가이드 포함)
-   - 최소 포함값: `action`(UPDATE/CREATE/UPDATE+CREATE/NO_CHANGE), 수정/생성한 `screen_id`, `matched_screen_id`, `matched_boards`, Board 목록, 디자이너 가이드, `export_shape` 확인 결과 또는 Penpot 영향 없음 사유
+   - 최소 포함값: `action`(UPDATE/CREATE/UPDATE+CREATE/NO_CHANGE), `designer_required`, `design_reason`, `design_target_boards`, 수정/생성한 `screen_id`, `matched_screen_id`, `matched_boards`, Board 목록, 디자이너 가이드, `export_shape` 확인 결과 또는 Penpot 영향 없음 사유
    - `CREATE` 또는 `UPDATE+CREATE`가 있으면, 새 화면 항목은 다음 단계에서 designer가 `design_*`를 만들고 그 뒤 developer → QA/tester 검증으로 이어질 수 있게 필요한 Board 정보와 근거를 빠짐없이 넘긴다
 
 ## 기획서 작성 규칙

@@ -40,6 +40,7 @@ hooks:
 - 결과물을 저장하고 결과를 반환한다.
 - VOC/업데이트 흐름에서 하네스가 전달한 정보로 판단 가능한 범위면 사용자에게 다시 묻지 않고 수정 후 다음 검증 단계가 바로 이어질 수 있는 결과를 반환한다.
 - UI-visible 변경(화면 구조, 상태, 레이아웃, 스타일, 문구) 요청을 직접 받았는데 planner/designer 선행 산출물이 아직 없으면 개발을 시작하지 않는다.
+- planner 반환에 `designer_required = Y`가 있으면 designer 완료 전에는 개발을 시작하지 않는다.
 - 이런 경우 developer의 역할은 구현이 아니라 **`planner/designer 선행 필요`를 반환하는 것**이다.
 - 작업 보드(`workspace/planning/request-workboard.md`)가 전달되면, developer는 자기 담당 항목과 선행 조건 충족 여부를 먼저 확인한다.
 
@@ -99,7 +100,7 @@ hooks:
 5. 여러 플랫폼 variant가 있으면 관련 플랫폼 페이지를 순서대로 전환하며 `wf_*`, `desc_*`, `design_*`를 확인한다
 6. `export_shape` 도구로 `wf_*`, `desc_*`, `design_*`를 확인한다
 7. 화면에서 보이는 변경(UI 구조, 상태, 문구, 레이아웃, 스타일)이 있는 요청이면 **planner의 기획서 + `wf_*` / `desc_*` 반영 완료 여부를 먼저 확인**한다
-8. `design_*`에 영향이 있는 UI-visible 변경이면 **designer의 `design_*` 반영 완료 + `export_shape` 확인 결과가 있어야만 시작**한다
+8. planner가 `designer_required = Y`로 반환했거나 `design_*`에 영향이 있는 UI-visible 변경이면 **designer의 `design_*` 반영 완료 + `export_shape` 확인 결과가 있어야만 시작**한다
 9. 위 선행 조건이 아직 충족되지 않았다면 개발을 먼저 시작하지 않고, `선행 산출물 미완료`로 반환한다
 
 #### 프론트엔드 산출물 구조 규칙
