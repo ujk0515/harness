@@ -184,9 +184,19 @@ hooks:
 | action | design_* Board 처리 |
 |--------|-------------------|
 | **UPDATE** | 기존 `design_*` Board를 찾아 **수정**한다. 변경된 요소만 업데이트하고, 나머지는 건드리지 않는다. 새 Board를 만들지 않는다. |
-| **CREATE** | 대응하는 `wf_*` 크기와 동일한 **새 `design_*` Board를 생성**한다. |
+| **CREATE** | `matched_screen_id`가 비어 있고, 기존 `design_*` Board 중 대응 후보가 없을 때만 대응하는 `wf_*` 크기와 동일한 **새 `design_*` Board를 생성**한다. |
 | **UPDATE+CREATE** | UPDATE 대상은 기존 Board 수정, CREATE 대상은 새 Board 생성. 각각 분리하여 처리한다. |
 | **NO_CHANGE** | `design_*` 수정 없이 종료한다. 단, `디자인 영향 없음` 사유를 반환에 명시한다. |
+
+### CREATE 전 중복 방지 게이트 (필수)
+
+1. `CREATE` 또는 `UPDATE+CREATE`를 받으면, 먼저 기획자가 넘긴 `matched_screen_id`, `matched_boards`, 기존 `design_*` Board 존재 여부를 확인한다.
+2. 같은 `screen_id` / variant의 `design_*` Board가 이미 있으면 **새 Board를 만들지 않고 UPDATE로 전환**한다.
+3. planner 가이드가 `CREATE`여도, 기존 `design_*`가 있고 요청이 기존 화면의 일부 수정으로 보이면 중복 생성하지 않는다.
+4. 새 Board 생성은 아래를 모두 만족할 때만 허용한다:
+   - `matched_screen_id`가 비어 있음
+   - 대응하는 기존 `design_*` Board가 없음
+   - planner가 `CREATE 사유`를 명시했음
 
 ### UPDATE 시 기존 Board 수정 절차
 
@@ -426,14 +436,17 @@ Board(currentFrameWidth×56, fill:#1E3A5F, shadow:tabbar) + Flex(row, justifyCon
 ### VOC / 업데이트에서 화면 관련 피드백이 왔을 때
 1. **기획자의 `[디자이너 가이드]`를 확인한다** — `action` 필드로 UPDATE/CREATE/혼합 여부를 파악한다.
 2. **`design_*` Board만 수정한다.** `wf_*`와 `desc_*`는 기획자의 영역이므로 절대 수정하지 않는다. VOC 반영이든 루프 A든 동일한 원칙이다.
-3. **action에 따라 분기한다:**
+3. **중복 생성 방지부터 확인한다.**
+   - `matched_screen_id`, `matched_boards`, 기존 `design_*` 존재 여부를 먼저 본다
+   - 기존 대응 `design_*`가 있으면 새 Board를 만들지 않고 UPDATE로 처리한다
+4. **action에 따라 분기한다:**
    - **UPDATE**: 기획자가 `wf_*`/`desc_*`를 먼저 업데이트한 상태이다. 기존 `design_*` Board를 찾아 변경분만 수정한다. 새 Board를 만들지 않는다.
-   - **CREATE**: 새 `design_*` Board를 생성한다 (루프 A-3 절차 적용).
+   - **CREATE**: 중복 방지 게이트를 통과한 경우에만 새 `design_*` Board를 생성한다 (루프 A-3 절차 적용).
    - **UPDATE+CREATE**: UPDATE 대상은 기존 Board 수정, CREATE 대상은 새 Board 생성.
    - **NO_CHANGE**: `design_*`는 건드리지 않고 종료한다. 단, 디자인 영향 없음 사유를 반환한다.
-4. `design_*`에 요소가 없으면 추가하고, 있으면 수정한다.
-5. **작업 후 반드시 `export_shape`로 수정한 `design_*` Board를 시각적으로 확인한다.** 요소가 실제로 보이는지 본인이 검증하고, 안 보이면 다시 작업한다. "했다"고 보고하고 실제로 안 된 것은 허용하지 않는다.
-6. 결과를 반환한다 — `action`, 어떤 `design_*` Board에 무엇을 추가/수정/생성했는지 명시 + export_shape 확인 결과 또는 디자인 영향 없음 사유 포함
+5. `design_*`에 요소가 없으면 추가하고, 있으면 수정한다.
+6. **작업 후 반드시 `export_shape`로 수정한 `design_*` Board를 시각적으로 확인한다.** 요소가 실제로 보이는지 본인이 검증하고, 안 보이면 다시 작업한다. "했다"고 보고하고 실제로 안 된 것은 허용하지 않는다.
+7. 결과를 반환한다 — `action`, 어떤 `design_*` Board에 무엇을 추가/수정/생성했는지 명시 + export_shape 확인 결과 또는 디자인 영향 없음 사유 포함
 
 ## 결과물 저장
 - UX 리뷰: workspace/design/A-uiux-review.md

@@ -95,19 +95,35 @@ hooks:
 | **신규 화면 생성** (CREATE) | 요청이 기존 어떤 `screen_id`에도 해당하지 않는 완전히 새로운 화면/라우트를 필요로 함 | "마이페이지 화면 추가", "여행 공유 초대 화면 신규" |
 | **혼합** (UPDATE + CREATE) | 기존 화면 일부를 수정하면서 새로운 화면도 필요함 | "설정 메뉴 추가(홈 수정) + 설정 상세 화면(신규)" |
 
+### UPDATE 우선 판별 규칙 (필수)
+
+- 기존 라우트, 기존 화면, 기존 카드, 기존 버튼, 기존 모달, 기존 상태, 기존 문구, 기존 스타일을 **변경**하는 요청은 기본적으로 `UPDATE`다.
+- 사용자가 화면 이름을 직접 말하지 않아도, 요청 대상이 기존 UI 요소/상태/영역으로 매핑되면 `UPDATE`로 판정한다.
+  - 예: "과거 카드 딤 처리" → `home_list` 또는 카드가 존재하는 기존 목록 화면의 `UPDATE`
+  - 예: "로그인 버튼 문구 변경" → `auth_login`의 `UPDATE`
+- `CREATE`는 **새 route / 새 view / 새 독립 flow / 새 screen_id가 반드시 필요한 경우에만** 허용한다.
+- 기존 화면 안의 일부 요소 추가/삭제, 상태 변화, 스타일 변화, 문구 수정만으로 해결 가능하면 새 `screen_id`를 만들지 않는다.
+- `UPDATE`와 `CREATE`가 헷갈리면 **기본값은 `UPDATE`**다. 추측으로 새 Board를 만들지 않는다.
+- `CREATE`로 판정할 때는 반드시 아래를 함께 기록한다:
+  - 왜 기존 `screen_id`로 흡수할 수 없는지
+  - 어떤 새 route / view / flow가 생기는지
+  - 검토한 기존 `screen_id` 후보와 탈락 사유
+
 ### Step 3. 판별 결과에 따른 작업 경로
 
 #### UPDATE 경로 (기존 화면 수정)
 1. **기획서**: 기존 기획 문서를 찾아 해당 화면 섹션을 **Edit으로 수정**한다. 새 파일을 만들지 않는다.
 2. **Penpot `wf_*`**: 기존 Board를 찾아 **요소를 추가/수정/삭제**한다. 새 Board를 만들지 않는다.
 3. **Penpot `desc_*`**: 기존 Board를 찾아 **변경된 항목의 Description을 수정**하거나 새 No 행을 추가한다.
+4. 기존 화면의 부분 수정, 상태 추가, 스타일 추가, 문구 변경 때문에 새 `screen_id` / 새 Board를 만들지 않는다.
 4. 반환 시 `action: "UPDATE"`, 수정한 `screen_id`, 수정한 Board 목록, `export_shape` 확인 결과를 명시한다.
 
 #### CREATE 경로 (신규 화면 생성)
 1. **기획서**: 기존 기획 문서에 새 화면 섹션을 **추가**하거나, 독립 기능이면 별도 기획 문서를 작성한다.
 2. **Penpot `wf_*`**: 새 Board를 생성한다 (기존 배치 규칙대로 `storage.nextPairX` 사용).
 3. **Penpot `desc_*`**: 새 Board를 생성한다.
-4. 반환 시 `action: "CREATE"`, 새 `screen_id`, 생성한 Board 목록, `export_shape` 확인 결과를 명시한다.
+4. `CREATE`를 쓰기 전에 반드시 기존 `screen_id` 후보를 검토하고, 왜 기존 화면 수정으로 처리할 수 없는지 사유를 남긴다.
+5. 반환 시 `action: "CREATE"`, 새 `screen_id`, 생성한 Board 목록, `export_shape` 확인 결과를 명시한다.
 
 #### 혼합 경로
 - UPDATE 대상과 CREATE 대상을 분리하여 각각의 경로를 적용한다.
@@ -124,9 +140,13 @@ hooks:
 ```
 [디자이너 가이드]
 - action: UPDATE | CREATE | UPDATE+CREATE | NO_CHANGE
+- matched_screen_id: 기존 화면으로 매칭된 `screen_id` 목록 (없으면 빈 배열)
+- match_basis: 어떤 근거로 해당 `screen_id`에 매칭했는지 (`기획서`, `wf_*`, `desc_*`, 기존 route/view/component`)
+- matched_boards: 수정 대상으로 판단한 기존 `wf_*` / `desc_*` / `design_*` Board 목록
 - UPDATE 대상: screen_id 목록 + 각각의 변경 요약 (예: "home_list — 과거 카드 딤 스타일 추가")
 - CREATE 대상: screen_id 목록 + 각각의 화면 설명
 - 기존 design_* Board 존재 여부: 있음/없음 (디자이너가 수정할지 새로 만들지 판단 기준)
+- CREATE 사유: 왜 기존 화면 수정이 아닌지 (CREATE/UPDATE+CREATE일 때만)
 ```
 
 ---
@@ -145,7 +165,7 @@ hooks:
    - UPDATE+CREATE: 기존 수정 + 신규 생성을 각각 수행
 6. 화면 흐름도를 Mermaid 코드로 작성하여 기획 문서에 포함한다
 7. 결과를 반환한다 (디자이너 가이드 포함)
-   - 최소 포함값: `action`(UPDATE/CREATE), 화면 목록(`screen_id`), 생성/수정한 `wf_*` / `desc_*` Board 목록, 디자이너 가이드, 건너뛴 화면(있으면)
+   - 최소 포함값: `action`(UPDATE/CREATE), 화면 목록(`screen_id`), `matched_screen_id`, `matched_boards`, 생성/수정한 `wf_*` / `desc_*` Board 목록, 디자이너 가이드, 건너뛴 화면(있으면)
 
 ### 2. 기획서 + 와이어프레임 수정 요청 (루프 A-2)
 디자이너의 UX 리뷰 결과와 함께 호출된다.
@@ -189,7 +209,7 @@ hooks:
    - UPDATE+CREATE: 각각 수행
    - NO_CHANGE: 기획 문서만 수정하거나 Penpot 영향 없음 사유를 기록
 4. 결과를 반환한다 (디자이너 가이드 포함)
-   - 최소 포함값: `action`(UPDATE/CREATE/UPDATE+CREATE/NO_CHANGE), 수정/생성한 `screen_id`, Board 목록, 디자이너 가이드, `export_shape` 확인 결과 또는 Penpot 영향 없음 사유
+   - 최소 포함값: `action`(UPDATE/CREATE/UPDATE+CREATE/NO_CHANGE), 수정/생성한 `screen_id`, `matched_screen_id`, `matched_boards`, Board 목록, 디자이너 가이드, `export_shape` 확인 결과 또는 Penpot 영향 없음 사유
 
 ## 기획서 작성 규칙
 
