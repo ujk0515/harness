@@ -33,6 +33,8 @@ hooks:
 ## Penpot 완료 게이트 (필수)
 - Penpot 영향이 있는 작업이면 **`wf_*` / `desc_*` Board 실제 생성/수정 + `export_shape` 시각 확인**이 끝나야 완료다.
 - md 파일만 수정하고 Penpot을 반영하지 않은 상태는 미완료다.
+- `desc_*`에서 텍스트 겹침, 행 겹침, 셀 밖으로 넘친 텍스트가 하나라도 보이면 **미완료**다.
+- `desc_*` 겹침이 발견되면 행 분리/재배치/Board resize 후 `export_shape`로 다시 확인하기 전까지 완료로 반환할 수 없다.
 - Penpot 영향이 없는 경우에만 `action: "NO_CHANGE"`를 반환할 수 있다.
 - 반환에는 아래가 반드시 포함되어야 한다:
   - `action`: `CREATE` | `UPDATE` | `UPDATE+CREATE` | `NO_CHANGE`
@@ -62,7 +64,7 @@ hooks:
 2. workspace/planning/ 디렉토리의 기획 문서들을 읽어 기존 `screen_id` 목록을 파악한다
 3. Penpot에서 **대상 플랫폼 페이지를 모두 순회**하여 기존 `wf_*`/`desc_*`/`design_*` Board 이름을 수집한다
    ```javascript
-   const projectName = "TripLog"; // project-config.md에서 읽은 값
+   const projectName = "ProjectName"; // project-config.md에서 읽은 값
    const targetPlatforms = ["Mobile", "Desktop"]; // project-config.md에서 읽은 대상 플랫폼 목록
 
    const existing = [];
@@ -85,13 +87,13 @@ hooks:
 4. 수집한 정보를 `storage.existingScreens`에 저장한다:
    ```javascript
    storage.existingScreens = {
-     screenIds: ["auth_login", "home_list", "trip_detail", ...],
-     wfBoards: ["wf_auth_login", "wf_home_list", ...],
-     descBoards: ["desc_auth_login", "desc_home_list", ...],
-     designBoards: ["design_auth_login", "design_home_list", ...],
+     screenIds: ["auth_login", "item_list", "item_detail", ...],
+     wfBoards: ["wf_auth_login", "wf_item_list", ...],
+     descBoards: ["desc_auth_login", "desc_item_list", ...],
+     designBoards: ["design_auth_login", "design_item_list", ...],
      pagesByPlatform: {
        mobile: ["wf_auth_login", "desc_auth_login", "design_auth_login"],
-       desktop: ["wf_trip_detail_desktop", "desc_trip_detail_desktop"]
+       desktop: ["wf_item_detail_desktop", "desc_item_detail_desktop"]
      }
    };
    ```
@@ -103,14 +105,14 @@ hooks:
 | 판별 결과 | 조건 | 예시 |
 |-----------|------|------|
 | **기존 화면 수정** (UPDATE) | 요청이 이미 존재하는 `screen_id`의 동작/스타일/구조를 변경함 | "홈 카드에 딤 처리 추가", "로그인 화면에 소셜 로그인 버튼 추가" |
-| **신규 화면 생성** (CREATE) | 요청이 기존 어떤 `screen_id`에도 해당하지 않는 완전히 새로운 화면/라우트를 필요로 함 | "마이페이지 화면 추가", "여행 공유 초대 화면 신규" |
+| **신규 화면 생성** (CREATE) | 요청이 기존 어떤 `screen_id`에도 해당하지 않는 완전히 새로운 화면/라우트를 필요로 함 | "마이페이지 화면 추가", "협업 초대 화면 신규" |
 | **혼합** (UPDATE + CREATE) | 기존 화면 일부를 수정하면서 새로운 화면도 필요함 | "설정 메뉴 추가(홈 수정) + 설정 상세 화면(신규)" |
 
 ### UPDATE 우선 판별 규칙 (필수)
 
 - 기존 라우트, 기존 화면, 기존 카드, 기존 버튼, 기존 모달, 기존 상태, 기존 문구, 기존 스타일을 **변경**하는 요청은 기본적으로 `UPDATE`다.
 - 사용자가 화면 이름을 직접 말하지 않아도, 요청 대상이 기존 UI 요소/상태/영역으로 매핑되면 `UPDATE`로 판정한다.
-  - 예: "과거 카드 딤 처리" → `home_list` 또는 카드가 존재하는 기존 목록 화면의 `UPDATE`
+  - 예: "기존 카드 딤 처리" → `item_list` 또는 카드가 존재하는 기존 목록 화면의 `UPDATE`
   - 예: "로그인 버튼 문구 변경" → `auth_login`의 `UPDATE`
 - `CREATE`는 **새 route / 새 view / 새 독립 flow / 새 screen_id가 반드시 필요한 경우에만** 허용한다.
 - 기존 화면 안의 일부 요소 추가/삭제, 상태 변화, 스타일 변화, 문구 수정만으로 해결 가능하면 새 `screen_id`를 만들지 않는다.
@@ -157,7 +159,7 @@ hooks:
 - matched_screen_id: 기존 화면으로 매칭된 `screen_id` 목록 (없으면 빈 배열)
 - match_basis: 어떤 근거로 해당 `screen_id`에 매칭했는지 (`기획서`, `wf_*`, `desc_*`, 기존 route/view/component`)
 - matched_boards: 수정 대상으로 판단한 기존 `wf_*` / `desc_*` / `design_*` Board 목록
-- UPDATE 대상: screen_id 목록 + 각각의 변경 요약 (예: "home_list — 과거 카드 딤 스타일 추가")
+- UPDATE 대상: screen_id 목록 + 각각의 변경 요약 (예: "item_list — 기존 카드 딤 스타일 추가")
 - CREATE 대상: screen_id 목록 + 각각의 화면 설명
 - 기존 design_* Board 존재 여부: 있음/없음 (디자이너가 수정할지 새로 만들지 판단 기준)
 - CREATE 사유: 왜 기존 화면 수정이 아닌지 (CREATE/UPDATE+CREATE일 때만)
@@ -180,7 +182,10 @@ hooks:
    - CREATE: 기획 문서를 작성/추가 + 새 `wf_*`/`desc_*` Board를 생성
    - UPDATE+CREATE: 기존 수정 + 신규 생성을 각각 수행
 8. 화면 흐름도를 Mermaid 코드로 작성하여 기획 문서에 포함한다
-9. 작업 보드에서 planner 담당 항목의 상태를 `done` 또는 `blocked`로 갱신한다
+9. 작업 보드에서 planner 담당 항목의 `planner_status`를 `done` 또는 `blocked`로 갱신한다
+   - planner 작업을 시작하면 `planner_status = in_progress`
+   - planner가 필수 에이전트가 아닌 항목이면 `planner_status = skipped`
+   - `overall_status`는 planner가 직접 완료 처리하지 않고, 역할별 status를 기준으로 요약값만 맞춘다
 10. 결과를 반환한다 (디자이너 가이드 포함)
    - 최소 포함값: `action`(UPDATE/CREATE), `designer_required`, `design_reason`, `design_target_boards`, 화면 목록(`screen_id`), `matched_screen_id`, `matched_boards`, 생성/수정한 `wf_*` / `desc_*` Board 목록, 디자이너 가이드, 건너뛴 화면(있으면)
    - `CREATE` 또는 `UPDATE+CREATE`가 있으면, 새 화면 항목은 다음 단계에서 designer가 `design_*`를 만들고 그 뒤 developer → QA/tester 검증으로 이어질 수 있게 필요한 Board 정보와 근거를 빠짐없이 넘긴다
@@ -227,7 +232,10 @@ hooks:
    - CREATE: 기획 문서에 새 화면 섹션 추가 + 새 `wf_*`/`desc_*` Board 생성
    - UPDATE+CREATE: 각각 수행
    - NO_CHANGE: 기획 문서만 수정하거나 Penpot 영향 없음 사유를 기록
-5. 작업 보드에서 planner 담당 항목의 상태를 `done` 또는 `blocked`로 갱신한다
+5. 작업 보드에서 planner 담당 항목의 `planner_status`를 `done` 또는 `blocked`로 갱신한다
+   - planner 작업을 시작하면 `planner_status = in_progress`
+   - planner가 필수 에이전트가 아닌 항목이면 `planner_status = skipped`
+   - `overall_status`는 역할별 status를 기준으로만 갱신한다
 6. 결과를 반환한다 (디자이너 가이드 포함)
    - 최소 포함값: `action`(UPDATE/CREATE/UPDATE+CREATE/NO_CHANGE), `designer_required`, `design_reason`, `design_target_boards`, 수정/생성한 `screen_id`, `matched_screen_id`, `matched_boards`, Board 목록, 디자이너 가이드, `export_shape` 확인 결과 또는 Penpot 영향 없음 사유
    - `CREATE` 또는 `UPDATE+CREATE`가 있으면, 새 화면 항목은 다음 단계에서 designer가 `design_*`를 만들고 그 뒤 developer → QA/tester 검증으로 이어질 수 있게 필요한 Board 정보와 근거를 빠짐없이 넘긴다
@@ -270,11 +278,11 @@ hooks:
 - 플랫폼 변형 suffix는 `_mobile`, `_desktop`, `_tablet`만 사용한다
 - 상태 변형이 있으면 의미가 드러나게 붙인다: `_empty`, `_loading`, `_error`, `_success`
 - 같은 화면의 플랫폼 variant를 둘 이상 만들면 **모든 variant에 플랫폼 suffix를 붙인다**
-  - 예: `trip_detail_mobile`, `trip_detail_desktop`
+  - 예: `item_detail_mobile`, `item_detail_desktop`
 - 모바일 단독 프로젝트이거나 모바일 기본형만 하나 만드는 경우에는 `_mobile` suffix를 생략할 수 있다
   - 예: `auth_login`
 - 같은 화면 쌍은 동일한 `screen_id`를 공유한다
-  - 예: `wf_trip_detail_mobile`, `desc_trip_detail_mobile`
+  - 예: `wf_item_detail_mobile`, `desc_item_detail_mobile`
 
 ### 플랫폼별 와이어프레임 생성 기준
 - `모바일`만 대상이면 모바일 Board만 만든다
@@ -299,7 +307,7 @@ hooks:
 **플랫폼/화면 방향이 다르면 Penpot 페이지를 분리한다.**
 - 같은 프로젝트 안에서 모바일/데스크톱/태블릿은 별도 페이지로 관리한다.
 - 페이지 이름: `{프로젝트명} — {플랫폼}`
-  - 예: `TripLog — Mobile`, `TripLog — Desktop`, `TripLog — Tablet`
+  - 예: `ProjectName — Mobile`, `ProjectName — Desktop`, `ProjectName — Tablet`
 - 모바일 보드(`wf_auth_login` 등)와 데스크톱 보드(`wf_auth_login_desktop` 등)를 같은 페이지에 놓지 않는다.
 - 크기가 다른 보드끼리 겹치면 작업이 엉망이 된다. **절대 같은 페이지에 섞지 않는다.**
 - 프로젝트 최초 시작 시 project-config.md의 플랫폼 설정을 확인하고, 필요한 페이지를 모두 생성한다.
@@ -315,7 +323,7 @@ Board 생성 전에 **project-config.md의 프로젝트명 + 대상 플랫폼으
 
 ```javascript
 // ✅ 프로젝트 페이지 생성/전환 — Board 생성 전 반드시 실행
-const projectName = "TripLog"; // project-config.md에서 읽은 프로젝트명
+const projectName = "ProjectName"; // project-config.md에서 읽은 프로젝트명
 const platform = "Mobile"; // 현재 작업 대상 플랫폼
 const pageName = `${projectName} — ${platform}`;
 
@@ -398,12 +406,18 @@ storage.projectPages[platform.toLowerCase()] = penpot.currentPage;
 - 각 No는 `wf_*` Board의 구성요소 또는 의미 있는 기능 블록과 1:1 대응한다
   - 버튼 1개, 입력 필드 1개, 카드 1개, 토스트 1개처럼 **읽는 사람이 바로 구분 가능한 단위**로 나눈다
   - 서로 다른 컴포넌트를 한 No 안에 억지로 합치지 않는다
+  - 서로 독립적인 입력 필드 2개 이상, 버튼 2개 이상, 피드백 요소 2개 이상이 한 셀에 들어가면 별도 No 행으로 분리한다
 - Description에 포함할 내용:
   - 요소 이름 + 역할
   - 동작 설명 (클릭 시 어디로 이동, 어떤 기능 실행)
   - 입력 필드: placeholder, 유효성 조건, 최소/최대 길이
   - 상태: default/활성/비활성/에러 상태별 동작
   - 조건부 노출: 언제 보이고 언제 숨겨지는지
+- `desc_*`는 **사용자 화면 기준 설명만** 작성한다.
+  - 허용: 화면에 보이는 텍스트, UI 구성, 사용자 동작, 상태, 유효성, 조건부 노출, 피드백 메시지
+  - 금지: API/엔드포인트, request/response, DB/테이블/스키마, React/Vue 컴포넌트명, state/hook/props, 함수명, className, 파일 경로, 내부 구현 순서
+- 기술 구현 설명이 필요하면 **기획서 본문**에 적고, `desc_*`에는 적지 않는다.
+- `desc_*`에 기술 구현 용어가 섞이면 해당 행은 미완료로 보고 화면 설명 기준으로 다시 작성한다.
 - 배경: #333333 (헤더), #FFFFFF (본문)
 - 텍스트: #FFFFFF (헤더), #333333 (본문)
 - 본문 텍스트는 **left align + auto-height**를 사용한다
@@ -413,6 +427,7 @@ storage.projectPages[platform.toLowerCase()] = penpot.currentPage;
   - 둘째 줄부터: 불릿 리스트
   - 불릿 깊이는 최대 2단계까지만 허용한다
   - 한 줄에는 한 의미만 적는다. 여러 조건을 쉼표로 길게 이어 쓰지 않는다
+  - 상위 불릿 6개 초과, 전체 줄 수 10줄 초과가 예상되면 **새 No 행으로 분리**한다
 - Description 셀 불릿 규칙:
   - `• 역할/표시 정보`
   - `• 동작`
@@ -442,14 +457,26 @@ storage.projectPages[platform.toLowerCase()] = penpot.currentPage;
     • 최소/최대 길이: 2자 / 10자
     • 초과 시: 입력 불가
   ```
-- **행 높이는 고정하지 않는다.** Description Text를 `growType: 'auto-height'`로 생성하고, 100ms 대기 후 실제 높이를 읽어서 다음 행의 y 좌표를 계산한다.
+- **행 높이는 고정하지 않는다.** Description Text를 `growType: 'auto-height'`로 생성하고, 100ms 대기 후 실제 높이를 읽어 **rowHeight 자체를 계산**한다.
+- 각 No 행의 `No` 셀 높이와 `Description` 셀 높이는 반드시 같은 `rowHeight`를 사용한다.
+- 다음 행 시작 y는 반드시 `이전 행 y + rowHeight + gap`으로 계산한다. `gap`은 최소 16~20px를 둔다.
   ```javascript
   descText.growType = 'auto-height';
   await new Promise(r => setTimeout(r, 100));
   const textHeight = descText.height;
-  nextY = currentY + Math.max(textHeight + 20, 40); // 최소 40px, 텍스트 높이 + 여백 20px
+  const rowHeight = Math.max(textHeight + 24, 56); // 텍스트 높이 + 상하 여백, 최소 56px
+  noCell.resize(noCell.width, rowHeight);
+  descCell.resize(descCell.width, rowHeight);
+  nextY = currentY + rowHeight + 16; // 최소 gap 16px
   ```
 - 모든 행 생성이 끝난 뒤 `desc_*` Board를 실제 콘텐츠 높이에 맞게 resize한다
+- 모든 행 생성이 끝난 뒤 `export_shape`로 **행 간 겹침이 없는지 최종 확인**한다.
+- 겹침 판단 기준:
+  - 다음 행의 시작 y가 이전 행의 하단보다 위에 있음
+  - 텍스트가 같은 No 행의 셀 밖으로 넘침
+  - 서로 다른 No 행 텍스트가 시각적으로 맞닿거나 겹침
+- 위 셋 중 하나라도 해당하면 해당 `desc_*`는 미완료이며, 행 분리 또는 재배치 후 다시 확인한다
+- API/DB/컴포넌트명/변수명/함수명 같은 기술 구현 용어가 보이면 해당 `desc_*`는 미완료이며, 사용자 화면 기준 설명으로 다시 작성한다
 
 ### 정렬 유틸리티 (필수 — 첫 execute_code에서 등록)
 
@@ -520,12 +547,18 @@ page.appendChild(wfBoard);  // 에러 발생!
      - Description 셀은 `제목 1줄 + 불릿 리스트` 형식으로 작성
      - 긴 설명은 문단으로 쓰지 말고 불릿으로 분해
      - 상태/검증/조건부 노출은 각각 별도 줄로 분리
+     - API/DB/컴포넌트명/변수명/함수명 등 기술 구현 용어는 쓰지 않는다
+     - 상위 불릿 6개 초과, 전체 줄 수 10줄 초과 예상 시 다음 No 행으로 분리
+     - 각 행은 `descText.height`를 읽어 `rowHeight`를 계산한 뒤 No/Description 셀 높이를 함께 맞춘다
 - 매 호출 끝에 `storage.screens[screenId]`를 업데이트한다
 - 화면 1개 완성 후 `storage.nextPairX += 970`으로 다음 쌍 위치를 갱신한다
 - Text 생성 후 크기를 읽어야 하면 `await new Promise(r => setTimeout(r, 100))` 대기
 - `desc_*` 본문 생성 후에는 실제 내용 높이를 기준으로 Board를 다시 resize한다
   - 최소 높이: 900
   - 권장 계산: `header + 본문 + 하단 여백 40px`
+- `desc_*` 본문 생성 후에는 `export_shape`로 행 겹침 여부를 반드시 확인한다
+  - 겹치면 완료로 반환하지 말고, 해당 행을 더 쪼개거나 y 재계산 후 다시 확인한다
+  - 기술 구현 용어가 보이면 완료로 반환하지 말고, 화면 설명 기준으로 다시 쓴 뒤 재확인한다
 
 #### 에러 처리 규칙
 - execute_code 실행 중 에러 발생 시 **같은 작업을 최대 5회 재시도**한다

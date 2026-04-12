@@ -134,7 +134,10 @@ hooks:
 #### 공통
 27. 결과를 반환한다
 28. 이슈와 함께 다시 호출되면 수정한다 (루프 D 반복)
-29. 작업 보드가 있으면 developer 담당 항목 상태를 `done` 또는 `blocked`로 갱신한다
+29. 작업 보드가 있으면 developer 담당 항목의 `developer_status`를 `done` 또는 `blocked`로 갱신한다
+    - developer 작업을 시작하면 `developer_status = in_progress`
+    - developer가 필수 에이전트가 아닌 항목이면 `developer_status = skipped`
+    - `overall_status`는 역할별 status를 기준으로만 갱신한다
 
 ### [루프 D] 수정 요청을 받았을 때
 1. 이전 이슈 목록, QA 결과, 테스터 결과, 수정 내역 요청 사항을 함께 읽는다

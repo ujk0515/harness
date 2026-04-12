@@ -31,7 +31,7 @@ color: cyan
    - `점수`
    - `주요 변경`
    - `남은 이슈`
-   - `작업 보드 상태 요약`
+   - `작업 보드 상태 요약 (overall_status + 역할별 status)`
 4. 없는 정보를 추측하지 않는다. 전달받지 못한 값은 `없음` 또는 `미전달`로 기록한다
 5. 기록 결과를 짧게 반환한다
 
@@ -150,9 +150,9 @@ color: cyan
 
 ## 7. 요청 작업 보드 이력
 
-| item_id | 요청 항목 | 최종 상태 | 비고 |
-|---------|-----------|-----------|------|
-| | | todo/in_progress/done/blocked/skipped | |
+| item_id | 요청 항목 | overall_status | planner | designer | developer | qa | tester | 비고 |
+|---------|-----------|----------------|---------|----------|-----------|----|--------|------|
+| | | todo/in_progress/done/blocked/skipped | todo/in_progress/done/blocked/skipped | todo/in_progress/done/blocked/skipped | todo/in_progress/done/blocked/skipped | todo/in_progress/done/blocked/skipped | todo/in_progress/done/blocked/skipped | |
 
 ---
 

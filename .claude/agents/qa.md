@@ -59,7 +59,7 @@ hooks:
 
 **프론트엔드 TC:**
 1. 작업 보드(`workspace/planning/request-workboard.md`)를 먼저 읽고 QA 담당 항목과 선행 조건을 확인한다
-2. QA 담당 항목 상태를 `in_progress`로 갱신한다
+2. QA 담당 항목의 `qa_status`를 `in_progress`로 갱신한다
 3. **기획서를 기준으로** 테스트케이스를 작성한다
    - 각 화면에서 어떤 동작을 확인해야 하는지
    - 각 컴포넌트의 동작이 정상인지
@@ -97,7 +97,8 @@ hooks:
 
 **공통:**
 10. 테스트케이스를 `workspace/testing/C-testcases.md`에 저장한다 (프론트 TC + API TC 구분하여 작성)
-11. QA 담당 항목 상태를 `done`, `blocked`, `skipped` 중 하나로 갱신한다
+11. QA 담당 항목의 `qa_status`를 `done`, `blocked`, `skipped` 중 하나로 갱신한다
+    - `overall_status`는 역할별 status를 기준으로만 갱신한다
 12. 결과를 반환한다
 
 ### 3. 개발 결과물 검증 요청 (루프 D)
@@ -105,7 +106,7 @@ hooks:
 
 **초회 검증 (턴 1):**
 1. 작업 보드(`workspace/planning/request-workboard.md`)를 먼저 읽고 QA 담당 검증 항목과 선행 조건을 확인한다
-2. QA 담당 항목 상태를 `in_progress`로 갱신한다
+2. QA 담당 항목의 `qa_status`를 `in_progress`로 갱신한다
 3. 테스트케이스, 기획서, 구현 코드를 **실행 없이 정적으로** 대조하며 확인한다
    - 각 화면/기능이 어떤 `screen_id`와 variant에 대응하는지 먼저 매핑한다
    - 필요시 `export_shape` 도구로 `wf_*`, `desc_*`, `design_*`를 내보내 구조/시각 일관성을 확인한다
@@ -141,7 +142,8 @@ hooks:
 
 **공통:**
 10. 검증 결과를 `workspace/reports/D-qa-verification.md`에 저장한다
-11. QA 담당 항목 상태를 `done`, `blocked`, `skipped` 중 하나로 갱신한다
+11. QA 담당 항목의 `qa_status`를 `done`, `blocked`, `skipped` 중 하나로 갱신한다
+    - `overall_status`는 역할별 status를 기준으로만 갱신한다
 12. 점수 + 이슈 목록을 반환한다
 13. 형식: `[루프 D-QA] 턴 N — 점수: XX점 — 부족한 부분: OOO`
 

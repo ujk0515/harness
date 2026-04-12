@@ -29,7 +29,7 @@ hooks:
 - 루프 A-3에서 `wf_*`와 `desc_*`를 바탕으로 `design_*`를 새로 만든다.
 - **React 코드를 생성하지 않는다.** 코드는 개발자가 한다.
 - VOC/업데이트 흐름에서 하네스가 전달한 정보로 판단 가능한 범위면 사용자에게 다시 묻지 않고 작업을 끝낸 뒤 다음 역할이 바로 이어질 수 있는 결과를 반환한다.
-- 작업 보드(`workspace/planning/request-workboard.md`)가 전달되면, 디자이너는 자기 담당 항목만 확인하고 상태를 갱신한다.
+- 작업 보드(`workspace/planning/request-workboard.md`)가 전달되면, 디자이너는 자기 담당 항목만 확인하고 `designer_status`만 갱신한다.
 
 ## Penpot 완료 게이트 (필수)
 - `design_*` 영향이 있는 작업이면 **실제 `design_*` Board 생성/수정 + `export_shape` 시각 확인**이 끝나야 완료다.
@@ -88,8 +88,8 @@ hooks:
 ### 플랫폼 / Variant 대응 규칙
 
 - `design_[screen_id]`는 대응하는 `wf_[screen_id]`와 같은 variant를 가진다
-  - 예: `wf_trip_detail_mobile` → `design_trip_detail_mobile`
-  - 예: `wf_trip_detail_desktop` → `design_trip_detail_desktop`
+  - 예: `wf_item_detail_mobile` → `design_item_detail_mobile`
+  - 예: `wf_item_detail_desktop` → `design_item_detail_desktop`
 - 반응형 웹/복수 플랫폼이면 planner가 만든 핵심 variant를 모두 디자인한다
 - `design_*` Board 크기는 대응하는 `wf_*` Board 크기와 동일하게 맞춘다
 - 모바일 기본형만 있는 경우에만 390×844를 기본값으로 사용한다
@@ -157,7 +157,7 @@ hooks:
 | 활성 탭 내부 | #2563EB |
 | 비활성 탭 내부 | transparent (fill 없음) |
 | 구분선 | #E2E8F0 |
-| 장소 번호 뱃지 (전체) | #2563EB (색 통일) |
+| 순번 뱃지 (전체) | #2563EB (색 통일) |
 
 ### Stroke 기준
 
@@ -203,7 +203,7 @@ hooks:
 
 1. Penpot에서 대상 `design_*` Board를 `findShape`로 찾는다
    ```javascript
-   const board = penpotUtils.findShape(s => s.name === 'design_home_list');
+   const board = penpotUtils.findShape(s => s.name === 'design_item_list');
    ```
 2. `export_shape`로 현재 상태를 확인한다
 3. 기획자가 수정한 `wf_*`/`desc_*`를 참조하여 변경 사항을 파악한다
@@ -317,12 +317,12 @@ hooks:
 **모바일 (390px)**
 - 배치 y좌표: wf 높이(844px) + 120px = **y=964**
 - design 간 x 간격: wf+desc 쌍 반복 단위와 동일 (**970px**)
-- 예: `design_auth_login` x=0, `design_home_list` x=970
+- 예: `design_auth_login` x=0, `design_item_list` x=970
 
 **데스크톱 (1440px)**
 - 배치 y좌표: wf 높이(1024px) + 120px = **y=1144**
 - design 간 x 간격: wf+desc 쌍 반복 단위와 동일 (**2100px**)
-- 예: `design_auth_login_desktop` x=0, `design_home_list_desktop` x=2100
+- 예: `design_auth_login_desktop` x=0, `design_item_list_desktop` x=2100
 
 - `storage.designBoards[screenId] = { boardId, x, y }` 형태로 저장한다
 - 레이아웃 요약:
@@ -358,8 +358,8 @@ Board(contentWidth×auto, fill:#FFFFFF, radius:16, shadow:card) + Flex(column, p
 Board(contentWidth×auto, fill:#F8FAFC, radius:8) + Flex(row, alignItems:center, padding:12 16, gap:12)
   ├─ 번호 뱃지 (24×24, fill:#2563EB, radius:999) + 내부 Text(center)
   ├─ 콘텐츠 그룹 Flex(column, gap:4)
-  │   ├─ 장소명 (Body, 15px, 700)
-  │   └─ 시간 + 메모 (Caption, 11px, #64748B)
+  │   ├─ 항목명 (Body, 15px, 700)
+  │   └─ 보조 정보 (Caption, 11px, #64748B)
   └─ 우측 액션 (선택)
 ```
 
@@ -393,14 +393,14 @@ Board(currentFrameWidth×56, fill:#1E3A5F, shadow:tabbar) + Flex(row, justifyCon
 
 | 항목 | 예시 데이터 |
 |------|-----------|
-| 여행 제목 | "도쿄 봄 여행", "파리 허니문" |
-| 국가 | "🇯🇵 일본", "🇫🇷 프랑스" |
+| 화면 제목 | "프로젝트 A", "신규 캠페인" |
+| 카테고리 | "카테고리 A", "카테고리 B" |
 | 기간 | "2025.03.10 - 03.17 (7일)" |
-| 장소명 | "신주쿠 교엔", "아사쿠사 센소지" |
+| 항목명 | "첫 번째 항목", "두 번째 항목" |
 | 시간 | "10:00", "14:00" |
-| 경비 | "₩520,000", "¥1,200" |
+| 수치/금액 | "₩520,000", "12건" |
 | 이메일 | "traveler@email.com" |
-| 댓글 | "너무 부럽다! 벚꽃 사진 더 보여줘" |
+| 댓글 | "이 항목 먼저 검토 부탁드립니다." |
 
 #### 아이콘 처리 정책
 
@@ -409,7 +409,7 @@ Board(currentFrameWidth×56, fill:#1E3A5F, shadow:tabbar) + Flex(row, justifyCon
    - 크기: 20×20 (소), 24×24 (기본), 32×32 (대)
 2. **우선순위 2: 유니코드/이모지 텍스트로 대체**
    - ← (뒤로), ↑ (공유), + (추가), × (닫기), ⋯ (더보기)
-   - 이모지: 🏠 (홈), ✈️ (여행), 💰 (경비)
+   - 이모지: 🏠 (홈), 📋 (목록), ⚙️ (설정)
    - `import_image` 사용이 불가능하거나 소스 확보가 막힌 경우에만 임시로 허용한다
 3. **최종 handoff 원칙:**
    - `import_image` 사용 가능 상태라면 실제 아이콘을 우선한다
@@ -431,7 +431,7 @@ Board(currentFrameWidth×56, fill:#1E3A5F, shadow:tabbar) + Flex(row, justifyCon
 - **"텍스트", "제목" 등 의미 없는 placeholder 금지** — 실제 데이터 사용
 - 버튼에 `borderRadius: 999` 사용 금지 (pill 버튼 금지)
 - 탭바/사이드바에 shadow 없이 배경만 적용하지 않기 (하단 shadow 필수)
-- 장소 번호 뱃지 색상 불일치 금지 (전체 #2563EB 통일)
+- 순번 뱃지 색상 불일치 금지 (전체 #2563EB 통일)
 - 비활성 탭에 fill 색상 적용 금지 (투명 유지)
 - Text `resize()`만 하고 `growType` 미복원 금지
 - 아이콘 자리에 빈 도형만 놓는 것 금지
@@ -450,7 +450,10 @@ Board(currentFrameWidth×56, fill:#1E3A5F, shadow:tabbar) + Flex(row, justifyCon
    - **NO_CHANGE**: `design_*`는 건드리지 않고 종료한다. 단, 디자인 영향 없음 사유를 반환한다.
 6. `design_*`에 요소가 없으면 추가하고, 있으면 수정한다.
 7. **작업 후 반드시 `export_shape`로 수정한 `design_*` Board를 시각적으로 확인한다.** 요소가 실제로 보이는지 본인이 검증하고, 안 보이면 다시 작업한다. "했다"고 보고하고 실제로 안 된 것은 허용하지 않는다.
-8. 작업 보드에서 designer 담당 항목의 상태를 `done` 또는 `blocked`로 갱신한다.
+8. 작업 보드에서 designer 담당 항목의 `designer_status`를 `done` 또는 `blocked`로 갱신한다.
+   - designer 작업을 시작하면 `designer_status = in_progress`
+   - designer가 필수 에이전트가 아닌 항목이면 `designer_status = skipped`
+   - `overall_status`는 역할별 status를 기준으로만 갱신한다.
 9. 결과를 반환한다 — `action`, 어떤 `design_*` Board에 무엇을 추가/수정/생성했는지 명시 + export_shape 확인 결과 또는 디자인 영향 없음 사유 포함
 
 ## 결과물 저장
@@ -540,7 +543,7 @@ storage.layout = {
 #### 텍스트 생성 (가장 중요)
 ```javascript
 // ✅ 올바른 텍스트 생성 — 반드시 resize + growType 세트
-const text = penpot.createText('장소 추가');
+const text = penpot.createText('항목 추가');
 text.fontSize = 18;
 text.fontWeight = '700';
 text.fills = [{ fillColor: '#1E3A5F', fillOpacity: 1 }];
