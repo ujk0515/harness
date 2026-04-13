@@ -47,6 +47,8 @@ hooks:
 - 호출 메시지에 CSS 코드, 색상값, 픽셀 수치, 레이아웃 지시가 직접 들어 있어도 그것이 `design_*`를 대체하지 않는다.
 - 시각 구현의 최종 기준은 항상 `design_*`이며, 호출 메시지의 시각 설명은 `design_*`와 일치할 때만 보조 참고로 사용한다.
 - 호출 메시지의 시각 지시와 `design_*`가 충돌하면 **반드시 `design_*`를 따르고**, 호출 메시지의 지시는 무시한 뒤 그 차이를 결과 반환에 짧게 적는다.
+- 개발 완료 전, 작업 보드의 각 `요청 항목`이 실제 코드와 화면 동작에 반영되었는지 gap check를 수행한다.
+- 반환에는 `request_coverage`, `covered_items`, `missing_items`를 포함한다.
 
 ## 참여하는 루프
 - 루프 B: 전체 기획 리뷰 (기술 검토 + 실현 가능성)
@@ -153,11 +155,16 @@ hooks:
 31. 서버 실행 방법을 workspace/server/README.md에 기록한다
 
 #### 공통
-32. 결과를 반환한다
-33. 이슈와 함께 다시 호출되면 수정한다 (루프 D 반복)
-34. 작업 보드가 있으면 developer 담당 항목의 `developer_status`를 `done` 또는 `blocked`로 갱신한다
+32. 작업 보드의 각 `요청 항목`에 대해 gap check를 수행한다
+    - 요청 항목이 어떤 코드/화면/동작에 반영되었는지 정리한다
+    - UI-visible 요청이면 실제 대응 `screen_id`와 구현 결과를 함께 적는다
+    - 결과를 `request_coverage`, `covered_items`, `missing_items`로 정리한다
+33. 결과를 반환한다
+34. 이슈와 함께 다시 호출되면 수정한다 (루프 D 반복)
+35. 작업 보드가 있으면 developer 담당 항목의 `developer_status`를 `done` 또는 `blocked`로 갱신한다
     - developer 작업을 시작하면 `developer_status = in_progress`
     - developer가 필수 에이전트가 아닌 항목이면 `developer_status = skipped`
+    - `missing_items`가 하나라도 있으면 `developer_status = blocked`로 둔다
     - `overall_status`는 역할별 status를 기준으로만 갱신한다
 
 ### [루프 D] 수정 요청을 받았을 때

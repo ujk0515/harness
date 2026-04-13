@@ -40,6 +40,9 @@ hooks:
   - `developer_ready`: `Y` | `N`
   - `developer_reason`: 개발자가 바로 구현 가능한지 또는 아직 불가능한지 사유
   - `developer_targets`: 구현 대상 `screen_id` / variant / `design_*` Board 목록
+  - `request_coverage`: `item_id`별로 어떤 `design_*`에 반영했는지
+  - `covered_items`: 디자인 반영 완료된 `item_id`
+  - `missing_items`: 디자인 반영이 남았거나 불명확한 `item_id` + 사유
   - 대상 `screen_id` / variant
   - 생성/수정/유지한 `design_*` Board 목록
   - `export_shape` 확인 결과 또는 `디자인 영향 없음` 사유
@@ -453,15 +456,23 @@ Board(currentFrameWidth×56, fill:#1E3A5F, shadow:tabbar) + Flex(row, justifyCon
    - **NO_CHANGE**: `design_*`는 건드리지 않고 종료한다. 단, 디자인 영향 없음 사유를 반환한다.
 6. `design_*`에 요소가 없으면 추가하고, 있으면 수정한다.
 7. **작업 후 반드시 `export_shape`로 수정한 `design_*` Board를 시각적으로 확인한다.** 요소가 실제로 보이는지 본인이 검증하고, 안 보이면 다시 작업한다. "했다"고 보고하고 실제로 안 된 것은 허용하지 않는다.
-8. 작업 보드에서 designer 담당 항목의 `designer_status`를 `done` 또는 `blocked`로 갱신한다.
+8. 작업 보드의 각 `요청 항목`에 대해 gap check를 수행한다.
+   - 요청 항목이 어떤 `design_*`에 반영되었는지 정리한다
+   - 새 상태/오버레이/인터랙션이 요청에 있었다면 실제 `design_*`에서 확인한다
+   - 결과를 `request_coverage`, `covered_items`, `missing_items`로 정리한다
+9. 작업 보드에서 designer 담당 항목의 `designer_status`를 `done` 또는 `blocked`로 갱신한다.
    - designer 작업을 시작하면 `designer_status = in_progress`
    - designer가 필수 에이전트가 아닌 항목이면 `designer_status = skipped`
+   - `missing_items`가 하나라도 있으면 `designer_status = blocked`로 둔다
    - `overall_status`는 역할별 status를 기준으로만 갱신한다.
-9. 결과를 반환한다
+10. 결과를 반환한다
    - `action`
    - `developer_ready`: `Y` | `N`
    - `developer_reason`
    - `developer_targets`
+   - `request_coverage`
+   - `covered_items`
+   - `missing_items`
    - 어떤 `design_*` Board에 무엇을 추가/수정/생성했는지
    - `export_shape` 확인 결과 또는 디자인 영향 없음 사유
 

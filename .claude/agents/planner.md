@@ -163,6 +163,9 @@ hooks:
 - CREATE 대상: screen_id 목록 + 각각의 화면 설명
 - 기존 design_* Board 존재 여부: 있음/없음 (디자이너가 수정할지 새로 만들지 판단 기준)
 - CREATE 사유: 왜 기존 화면 수정이 아닌지 (CREATE/UPDATE+CREATE일 때만)
+- request_coverage: `item_id`별로 기획서 / `wf_*` / `desc_*` 반영 결과
+- covered_items: 반영 완료된 `item_id`
+- missing_items: 미반영 또는 불명확한 `item_id` + 사유
 ```
 
 ---
@@ -182,12 +185,18 @@ hooks:
    - CREATE: 기획 문서를 작성/추가 + 새 `wf_*`/`desc_*` Board를 생성
    - UPDATE+CREATE: 기존 수정 + 신규 생성을 각각 수행
 8. 화면 흐름도를 Mermaid 코드로 작성하여 기획 문서에 포함한다
-9. 작업 보드에서 planner 담당 항목의 `planner_status`를 `done` 또는 `blocked`로 갱신한다
+9. 작업 보드의 각 `요청 항목`에 대해 아래 gap check를 수행한다
+   - 기획서에 해당 요청 방향이 반영되었는지
+   - 대응 `wf_*`에 화면 구조가 반영되었는지
+   - 대응 `desc_*`에 사용자 화면 기준 설명이 반영되었는지
+   - 결과를 `request_coverage`, `covered_items`, `missing_items`로 정리한다
+10. 작업 보드에서 planner 담당 항목의 `planner_status`를 `done` 또는 `blocked`로 갱신한다
    - planner 작업을 시작하면 `planner_status = in_progress`
    - planner가 필수 에이전트가 아닌 항목이면 `planner_status = skipped`
+   - `missing_items`가 하나라도 있으면 `planner_status = blocked`로 둔다
    - `overall_status`는 planner가 직접 완료 처리하지 않고, 역할별 status를 기준으로 요약값만 맞춘다
-10. 결과를 반환한다 (디자이너 가이드 포함)
-   - 최소 포함값: `action`(UPDATE/CREATE), `designer_required`, `design_reason`, `design_target_boards`, 화면 목록(`screen_id`), `matched_screen_id`, `matched_boards`, 생성/수정한 `wf_*` / `desc_*` Board 목록, 디자이너 가이드, 건너뛴 화면(있으면)
+11. 결과를 반환한다 (디자이너 가이드 포함)
+   - 최소 포함값: `action`(UPDATE/CREATE), `designer_required`, `design_reason`, `design_target_boards`, 화면 목록(`screen_id`), `matched_screen_id`, `matched_boards`, 생성/수정한 `wf_*` / `desc_*` Board 목록, `request_coverage`, `covered_items`, `missing_items`, 디자이너 가이드, 건너뛴 화면(있으면)
    - `CREATE` 또는 `UPDATE+CREATE`가 있으면, 새 화면 항목은 다음 단계에서 designer가 `design_*`를 만들고 그 뒤 developer → QA/tester 검증으로 이어질 수 있게 필요한 Board 정보와 근거를 빠짐없이 넘긴다
 
 ### 2. 기획서 + 와이어프레임 수정 요청 (루프 A-2)
@@ -232,12 +241,16 @@ hooks:
    - CREATE: 기획 문서에 새 화면 섹션 추가 + 새 `wf_*`/`desc_*` Board 생성
    - UPDATE+CREATE: 각각 수행
    - NO_CHANGE: 기획 문서만 수정하거나 Penpot 영향 없음 사유를 기록
-5. 작업 보드에서 planner 담당 항목의 `planner_status`를 `done` 또는 `blocked`로 갱신한다
+5. 작업 보드의 각 `요청 항목`에 대해 gap check를 수행한다
+   - 요청 항목이 기획서 / `wf_*` / `desc_*`에 반영되었는지 정리한다
+   - 결과를 `request_coverage`, `covered_items`, `missing_items`로 반환한다
+6. 작업 보드에서 planner 담당 항목의 `planner_status`를 `done` 또는 `blocked`로 갱신한다
    - planner 작업을 시작하면 `planner_status = in_progress`
    - planner가 필수 에이전트가 아닌 항목이면 `planner_status = skipped`
+   - `missing_items`가 하나라도 있으면 `planner_status = blocked`로 둔다
    - `overall_status`는 역할별 status를 기준으로만 갱신한다
-6. 결과를 반환한다 (디자이너 가이드 포함)
-   - 최소 포함값: `action`(UPDATE/CREATE/UPDATE+CREATE/NO_CHANGE), `designer_required`, `design_reason`, `design_target_boards`, 수정/생성한 `screen_id`, `matched_screen_id`, `matched_boards`, Board 목록, 디자이너 가이드, `export_shape` 확인 결과 또는 Penpot 영향 없음 사유
+7. 결과를 반환한다 (디자이너 가이드 포함)
+   - 최소 포함값: `action`(UPDATE/CREATE/UPDATE+CREATE/NO_CHANGE), `designer_required`, `design_reason`, `design_target_boards`, 수정/생성한 `screen_id`, `matched_screen_id`, `matched_boards`, Board 목록, `request_coverage`, `covered_items`, `missing_items`, 디자이너 가이드, `export_shape` 확인 결과 또는 Penpot 영향 없음 사유
    - `CREATE` 또는 `UPDATE+CREATE`가 있으면, 새 화면 항목은 다음 단계에서 designer가 `design_*`를 만들고 그 뒤 developer → QA/tester 검증으로 이어질 수 있게 필요한 Board 정보와 근거를 빠짐없이 넘긴다
 
 ## 기획서 작성 규칙

@@ -188,6 +188,20 @@
 - 어떤 역할이든 선행 역할의 status가 `done` 또는 `skipped`가 아니면 다음 필수 역할로 넘길 수 없다.
 - 하네스는 각 루프 종료 시 `request-workboard.md`를 다시 읽어 미닫힌 항목이 없는지 확인한다.
 
+#### 요구사항 반영 점검 (gap check)
+- 하네스는 별도 gap test 문서를 만들지 않는다. **작업 보드의 `요청 항목` + 최신 기획서/산출물**을 기준으로 각 단계에서 반영 여부를 점검한다.
+- 각 역할은 자기 status를 `done`으로 닫기 전에, 자기 담당 항목이 실제 산출물에 반영됐는지 직접 대조해야 한다.
+- 점검 기준은 아래와 같다.
+  - planner: 요청 항목이 기획서 + `wf_*` + `desc_*`에 반영되었는지
+  - designer: 요청 항목이 `design_*`에 반영되었는지
+  - developer: 요청 항목이 실제 코드/화면 동작에 반영되었는지
+- 각 역할은 반환값에 최소한 아래를 포함한다.
+  - `request_coverage`: `item_id`별 반영 결과 요약
+  - `covered_items`: 반영 완료 항목 목록
+  - `missing_items`: 아직 반영되지 않았거나 불명확한 항목 목록 + 사유
+- `missing_items`가 하나라도 남아 있으면 해당 역할은 자기 status를 `done`으로 닫지 않는다. `blocked`로 두고 부족한 항목을 반환한다.
+- QA와 tester는 루프 D에서 위 coverage와 실제 산출물을 대조해 누락이 남아 있는지 최종 확인한다.
+
 #### UPDATE+CREATE 분리 규칙
 - 하나의 요청 안에 기존 화면 수정과 신규 화면 생성이 함께 있더라도 **작업 보드에서는 반드시 별도 행으로 분리**한다.
 - 하나의 행에 `UPDATE+CREATE`를 동시에 담지 않는다.
@@ -338,6 +352,7 @@
 1. Agent(planner) 호출: "요구사항: {X}. 작업 보드: workspace/planning/request-workboard.md. 벤치마킹: workspace/planning/A-benchmark.md. 기획서 작성 + Penpot 와이어프레임 생성해. 각 화면마다 `wf_[id]` Board와 `desc_[id]` Board를 따로 만들고, 라벨/디스크립션/상태별 화면을 포함해"
    - 작업 보드에 `matched_screen_id = 없음`이고 CREATE 후보 사유가 있으면 planner는 신규 화면 여부를 먼저 확정한다
    - 신규 화면으로 확정되면 새 `wf_*` / `desc_*`를 만들고, 디자이너에게 `action: CREATE` 가이드를 넘긴다
+   - planner는 결과를 반환하기 전에 작업 보드의 각 `요청 항목`이 기획서 + `wf_*` + `desc_*`에 반영되었는지 gap check를 수행하고 `request_coverage`를 함께 반환한다
    - 신규 화면으로 확정된 항목도 루프 A-3 이후 일반 화면과 동일하게 `developer → QA/tester → secretary` 흐름으로 이어진다
 2. Agent(designer) 호출: "기획서: {경로}. `wf_*`와 `desc_*`를 확인해서 UX 관점으로 리뷰해. 개선 필요 여부 판단해"
 3. 개선사항 없음 → 루프 A-2 건너뛰고 A-3으로
@@ -352,6 +367,7 @@
 ### 루프 A-3: 디자이너 Penpot 디자인 적용
 1. Agent(designer) 호출: "기획서 + `wf_*` + `desc_*`를 참조하여 `design_*` Board를 새로 생성해. 기존 와이어프레임 Board는 수정하지 마"
    - designer는 반환 시 `developer_ready`, `developer_reason`, `developer_targets`를 함께 넘겨 다음 단계 구현 가능 여부를 명시한다
+   - designer는 결과를 반환하기 전에 작업 보드의 각 `요청 항목`이 `design_*`에 반영되었는지 gap check를 수행하고 `request_coverage`를 함께 반환한다
 2. Agent(secretary) 호출: "루프 A 완료 기록. 기획서, `wf_*`, `desc_*`, `design_*`, 점수/리뷰 결과를 기준으로 이번 루프 요약을 agent-log에 기록해"
 3. 루프 A 전체 완료
 
@@ -369,13 +385,13 @@
    - 루프 B 완료
 
 ### 루프 C: 개발 + 테스트케이스 작성 (동시 진행)
-1. Agent(developer) 호출: "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md. `wf_*`, `desc_*`, `design_*`를 참조하여 프론트엔드 개발해 (workspace/development/). 서버 스택이 있으면 workspace/server/에 서버도 개발해"
+1. Agent(developer) 호출: "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md. `wf_*`, `desc_*`, `design_*`를 참조하여 프론트엔드 개발해 (workspace/development/). 서버 스택이 있으면 workspace/server/에 서버도 개발해. 구현 완료 전 각 `요청 항목`이 코드와 화면 동작에 반영되었는지 gap check하고 `request_coverage`를 반환해"
 2. Agent(qa) 호출: "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md. `wf_*`, `desc_*`, `design_*`를 확인해. 테스트케이스 작성해 (프론트 + 서버 API 둘 다)"
 3. Agent(secretary) 호출: "루프 C 완료 기록. 개발 산출물과 테스트케이스 경로를 기준으로 이번 루프 요약을 agent-log에 기록해"
 
 ### 루프 D: 개발 ↔ 검증
-1. Agent(qa) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로}. 코드 정적 분석으로 검증해"
-2. Agent(tester) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로}. Playwright로 브라우저 실행 테스트해"
+1. Agent(qa) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로} + planner/designer/developer request_coverage. 코드 정적 분석으로 검증해"
+2. Agent(tester) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로} + planner/designer/developer request_coverage. Playwright로 브라우저 실행 테스트해"
 3. QA(정적 분석) + 테스터(브라우저 실행) 점수 종합 (둘 중 낮은 점수 기준)
 4. 통과 기준 미만 → **위 `이슈 분류 / 라우팅 규약`의 `[분류]` 값 기준으로 분기한다**
    - `기획 문제` → Agent(planner) 수정 → `wf_*` / `desc_*` 영향 있으면 Agent(designer)로 `design_*` 재동기화 → 루프 C-1번으로
