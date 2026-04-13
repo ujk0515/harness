@@ -29,3 +29,11 @@ playwright-report/
 
 # Logs
 *.log
+
+# 프로젝트 원본 에셋 (workspace로 가공되어 사용됨, 원본은 로컬 보관)
+Triplog_icon.png
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.svg
