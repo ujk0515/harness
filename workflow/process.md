@@ -351,6 +351,7 @@
 
 ### 루프 A-3: 디자이너 Penpot 디자인 적용
 1. Agent(designer) 호출: "기획서 + `wf_*` + `desc_*`를 참조하여 `design_*` Board를 새로 생성해. 기존 와이어프레임 Board는 수정하지 마"
+   - designer는 반환 시 `developer_ready`, `developer_reason`, `developer_targets`를 함께 넘겨 다음 단계 구현 가능 여부를 명시한다
 2. Agent(secretary) 호출: "루프 A 완료 기록. 기획서, `wf_*`, `desc_*`, `design_*`, 점수/리뷰 결과를 기준으로 이번 루프 요약을 agent-log에 기록해"
 3. 루프 A 전체 완료
 
@@ -445,6 +446,17 @@ VOC/업데이트도 먼저 **요청 분해 + 작업 보드 갱신**을 수행한
 - 하네스가 외부 의존성, 요구사항 모호성, 기술적 불가능성을 발견한 경우에만 사용자에게 다시 묻는다
 - 상위 라우터는 UI-visible 변경 요청을 developer에게 직접 넘기지 않는다. 먼저 planner가 변경 화면과 `screen_id`를 확정해야 한다.
 
+### developer 호출 입력 계약
+- 하네스가 developer를 호출할 때 **새 CSS 스펙, 픽셀 수치, 색상값, 레이아웃 구조, 컴포넌트 내부 배치 규칙을 직접 작성해서 넘기지 않는다.**
+- developer 호출 메시지에는 아래만 전달한다.
+  - 수정 대상 `screen_id`
+  - 관련 기획서 경로
+  - 관련 `wf_*`, `desc_*`, `design_*` 참조 대상
+  - planner/designer의 수정 요약
+  - 이슈 목록 또는 구현 범위
+- 시각 구현 기준은 항상 `design_*`이며, 호출 메시지의 텍스트 설명은 정본 보조 설명일 뿐 `design_*`를 대체하지 않는다.
+- 호출 메시지와 `design_*`가 충돌하면 developer는 호출 메시지의 시각 지시를 따르지 않고 `design_*`를 기준으로 구현한다.
+
 ### 선행 완료 게이트
 - 화면에서 보이는 변경(UI 구조, 상태, 문구, 레이아웃, 스타일)이 있으면 **planner의 기획서 + `wf_*` / `desc_*` 반영이 먼저 완료**되어야 한다.
 - planner가 `designer_required = Y`를 반환했거나, 화면에서 보이는 변경이 있고 `design_*`에 영향이 있으면 **designer의 `design_*` 반영 + `export_shape` 확인이 먼저 완료**되어야 한다.
@@ -462,7 +474,8 @@ VOC/업데이트도 먼저 **요청 분해 + 작업 보드 갱신**을 수행한
    - **판단 기준: 사용자가 화면에서 보는 것이 바뀌면 디자이너가 들어간다.** 서버만 바뀌고 화면이 안 바뀌는 경우만 제외.
    - 디자이너는 planner가 기획서/`desc_*`에 명시한 상태(empty, loading, error, disabled)와 인터랙션(모달, 서랍, 토스트, 드롭다운)만 디자인한다.
    - planner가 `action: CREATE`를 넘기면 새 `design_*`를 생성한다
-3. **developer** → planner/designer 선행 완료 게이트를 통과한 뒤 코드 구현/수정
+   - 작업 완료 후 `developer_ready`, `developer_reason`, `developer_targets`를 반환해 다음 단계 handoff를 명시한다
+3. **developer** → planner/designer 선행 완료 게이트를 통과한 뒤, designer의 `developer_ready = Y`와 `developer_targets`를 확인하고 코드 구현/수정
 4. **QA** → 테스트케이스/스펙 영향이 있으면 TC 추가/수정 또는 정적 검증
 5. **tester** → 코드가 변경되면 Playwright 검증 (경량 변경이면 스모크/회귀, 일반 변경이면 전체 검증)
 6. 결과 전달

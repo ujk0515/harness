@@ -37,6 +37,9 @@ hooks:
 - 디자인 영향이 없는 경우에만 `action: "NO_CHANGE"`를 반환할 수 있다.
 - 반환에는 아래가 반드시 포함되어야 한다:
   - `action`: `UPDATE` | `CREATE` | `UPDATE+CREATE` | `NO_CHANGE`
+  - `developer_ready`: `Y` | `N`
+  - `developer_reason`: 개발자가 바로 구현 가능한지 또는 아직 불가능한지 사유
+  - `developer_targets`: 구현 대상 `screen_id` / variant / `design_*` Board 목록
   - 대상 `screen_id` / variant
   - 생성/수정/유지한 `design_*` Board 목록
   - `export_shape` 확인 결과 또는 `디자인 영향 없음` 사유
@@ -214,7 +217,7 @@ hooks:
 
 기존 루프 A-3 절차를 그대로 따른다 (아래 참고).
 - 신규 `design_*` 생성이 끝나면 해당 항목은 developer가 구현할 수 있는 상태가 된다.
-- 따라서 반환값에는 생성/수정한 `design_*` 목록과 `export_shape` 확인 결과를 명시해 다음 단계(developer → QA/tester)가 바로 이어질 수 있게 한다.
+- 따라서 반환값에는 생성/수정한 `design_*` 목록, `export_shape` 확인 결과, `developer_ready`, `developer_targets`를 명시해 다음 단계(developer → QA/tester)가 바로 이어질 수 있게 한다.
 
 ---
 
@@ -454,7 +457,26 @@ Board(currentFrameWidth×56, fill:#1E3A5F, shadow:tabbar) + Flex(row, justifyCon
    - designer 작업을 시작하면 `designer_status = in_progress`
    - designer가 필수 에이전트가 아닌 항목이면 `designer_status = skipped`
    - `overall_status`는 역할별 status를 기준으로만 갱신한다.
-9. 결과를 반환한다 — `action`, 어떤 `design_*` Board에 무엇을 추가/수정/생성했는지 명시 + export_shape 확인 결과 또는 디자인 영향 없음 사유 포함
+9. 결과를 반환한다
+   - `action`
+   - `developer_ready`: `Y` | `N`
+   - `developer_reason`
+   - `developer_targets`
+   - 어떤 `design_*` Board에 무엇을 추가/수정/생성했는지
+   - `export_shape` 확인 결과 또는 디자인 영향 없음 사유
+
+### developer handoff 규칙 (필수)
+- 디자이너는 작업 완료 후 **developer가 바로 구현할 수 있는지**를 반환값으로 명시한다.
+- 아래를 모두 만족하면 `developer_ready = Y`다.
+  - 필요한 `design_*` 생성/수정이 끝남
+  - `export_shape` 시각 확인 완료
+  - 구현 대상 `screen_id` / variant / `design_*` Board가 명확함
+- 하나라도 부족하면 `developer_ready = N`으로 두고 `developer_reason`에 부족한 점을 적는다.
+- `developer_targets`에는 최소한 아래를 포함한다.
+  - 구현 대상 `screen_id`
+  - variant
+  - 참조해야 할 `design_*` Board 이름
+  - 새로 생긴 상태/오버레이/인터랙션이 있으면 그 목록
 
 ## 결과물 저장
 - UX 리뷰: workspace/design/A-uiux-review.md
