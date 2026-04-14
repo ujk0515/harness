@@ -368,6 +368,7 @@
 1. Agent(designer) 호출: "기획서 + `wf_*` + `desc_*`를 참조하여 `design_*` Board를 새로 생성해. 기존 와이어프레임 Board는 수정하지 마"
    - designer는 반환 시 `developer_ready`, `developer_reason`, `developer_targets`를 함께 넘겨 다음 단계 구현 가능 여부를 명시한다
    - designer는 결과를 반환하기 전에 작업 보드의 각 `요청 항목`이 `design_*`에 반영되었는지 gap check를 수행하고 `request_coverage`를 함께 반환한다
+   - `design_*`는 대응 `wf_*` / `desc_*` 쌍의 실제 하단 아래에 배치하고, 같은 페이지에서 x축 정렬을 맞춘다
 2. Agent(secretary) 호출: "루프 A 완료 기록. 기획서, `wf_*`, `desc_*`, `design_*`, 점수/리뷰 결과를 기준으로 이번 루프 요약을 agent-log에 기록해"
 3. 루프 A 전체 완료
 

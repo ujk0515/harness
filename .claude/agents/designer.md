@@ -5,7 +5,7 @@ tools: Read, Write, Glob, Grep, Edit
 mcpServers: ["penpot"]
 model: sonnet
 memory: project
-maxTurns: 10
+maxTurns: 20
 permissionMode: acceptEdits
 color: pink
 hooks:
@@ -34,6 +34,7 @@ hooks:
 ## Penpot 완료 게이트 (필수)
 - `design_*` 영향이 있는 작업이면 **실제 `design_*` Board 생성/수정 + `export_shape` 시각 확인**이 끝나야 완료다.
 - 로컬 문서만 남기고 `design_*`를 수정하지 않은 상태는 미완료다.
+- `design_*`가 대응하는 `wf_*` / `desc_*` 쌍의 실제 하단보다 위에 있거나, 서로 겹치거나, 다른 플랫폼 페이지에 있으면 미완료다.
 - 디자인 영향이 없는 경우에만 `action: "NO_CHANGE"`를 반환할 수 있다.
 - 반환에는 아래가 반드시 포함되어야 한다:
   - `action`: `UPDATE` | `CREATE` | `UPDATE+CREATE` | `NO_CHANGE`
@@ -319,23 +320,34 @@ hooks:
 
 - `design_*` Board는 `wf_*` / `desc_*` 행 아래에 **두 번째 가로 행**으로 배치한다
 - 각 `design_*`의 x좌표는 대응하는 `wf_*` Board와 동일하게 맞춘다
+- 고정 y값을 맹신하지 않는다. **항상 대응하는 `wf_*`와 `desc_*`의 실제 하단값을 읽고, 그 아래에 배치**한다.
+- 배치 공식:
+  - `designY = max(wfBoard.y + wfBoard.height, descBoard.y + descBoard.height) + 120`
+  - 즉 `wf_*`가 아니라 **`wf_*` / `desc_*` 쌍의 실제 하단 기준**으로 배치한다
+- `desc_*`가 길어져도 `design_*`가 겹치지 않게 해야 한다. `wf 높이 + 120` 같은 고정값만으로 배치하지 않는다.
 
 **모바일 (390px)**
-- 배치 y좌표: wf 높이(844px) + 120px = **y=964**
+- 기본 예시 y좌표: wf 844px, desc가 그보다 짧을 때 **y=964**
 - design 간 x 간격: wf+desc 쌍 반복 단위와 동일 (**970px**)
 - 예: `design_auth_login` x=0, `design_item_list` x=970
 
 **데스크톱 (1440px)**
-- 배치 y좌표: wf 높이(1024px) + 120px = **y=1144**
+- 기본 예시 y좌표: wf 1024px, desc가 그보다 짧을 때 **y=1144**
 - design 간 x 간격: wf+desc 쌍 반복 단위와 동일 (**2100px**)
 - 예: `design_auth_login_desktop` x=0, `design_item_list_desktop` x=2100
 
 - `storage.designBoards[screenId] = { boardId, x, y }` 형태로 저장한다
 - 레이아웃 요약:
   ```
-  y=0:       [wf+desc] [wf+desc] ...  ← 가로 한 줄
-  y=964/1144: [design]  [design]  ...  ← 가로 한 줄, wf와 x 정렬
+  y=0:            [wf+desc] [wf+desc] ...  ← 가로 한 줄
+  y=max(bottom)+120: [design]  [design]  ...  ← 가로 한 줄, wf와 x 정렬
   ```
+- 배치 후 검증:
+  - `design_*`가 대응 `wf_*`와 같은 페이지에 있는지
+  - `design_*`.x가 대응 `wf_*`.x와 같은지
+  - `design_*`.y가 `max(wf.bottom, desc.bottom) + 120` 이상인지
+  - `design_*`가 대응 `desc_*`와 시각적으로 겹치지 않는지
+- 위 조건 중 하나라도 어기면 배치 수정 후 다시 `export_shape` 확인한다.
 
 #### 컴포넌트 조립 규칙
 

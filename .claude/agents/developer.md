@@ -5,7 +5,7 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 mcpServers: ["penpot"]
 model: opus
 memory: project
-maxTurns: 20
+maxTurns: 40
 permissionMode: acceptEdits
 color: green
 hooks:
