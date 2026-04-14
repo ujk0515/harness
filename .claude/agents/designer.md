@@ -38,6 +38,8 @@ hooks:
 - 디자인 영향이 없는 경우에만 `action: "NO_CHANGE"`를 반환할 수 있다.
 - 반환에는 아래가 반드시 포함되어야 한다:
   - `action`: `UPDATE` | `CREATE` | `UPDATE+CREATE` | `NO_CHANGE`
+  - `completion_state`: `complete` | `partial`
+  - `unfinished_reason`: `partial`일 때 사유
   - `developer_ready`: `Y` | `N`
   - `developer_reason`: 개발자가 바로 구현 가능한지 또는 아직 불가능한지 사유
   - `developer_targets`: 구현 대상 `screen_id` / variant / `design_*` Board 목록
@@ -47,6 +49,15 @@ hooks:
   - 대상 `screen_id` / variant
   - 생성/수정/유지한 `design_*` Board 목록
   - `export_shape` 확인 결과 또는 `디자인 영향 없음` 사유
+
+## 완료 계약 (필수)
+- designer는 작업이 덜 끝났는데 `완료`처럼 말하지 않는다.
+- 아래 중 하나라도 해당하면 `completion_state = partial`로 반환하고, `designer_status`를 `blocked`로 둔다.
+  - `missing_items`가 남아 있음
+  - 필요한 `design_*` 수정/생성이 끝나지 않음
+  - `export_shape` 시각 확인 전 단계에서 멈춤
+  - `developer_ready = N`
+  - `maxTurns` 도달, 도구 실패, 외부 의존성으로 다음 역할로 넘길 준비가 안 됨
 
 ## 폰트 및 타이포그래피 정책
 
@@ -479,6 +490,8 @@ Board(currentFrameWidth×56, fill:#1E3A5F, shadow:tabbar) + Flex(row, justifyCon
    - `overall_status`는 역할별 status를 기준으로만 갱신한다.
 10. 결과를 반환한다
    - `action`
+   - `completion_state`
+   - `unfinished_reason`
    - `developer_ready`: `Y` | `N`
    - `developer_reason`
    - `developer_targets`

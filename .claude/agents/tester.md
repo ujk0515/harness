@@ -26,9 +26,17 @@ hooks:
 - Playwright로 테스트 코드를 작성하고 실행하여 동작을 검증한다.
 - 직접 기획, 디자인, 개발을 하지 않는다.
 - 코드를 눈으로 읽고 판단하지 않는다. **반드시 실행해서 확인한다.**
+- `developer`가 필수인 항목, 또는 코드 수정/구현이 포함된 항목에서는 tester도 기본적으로 필수다. 시간 절약을 이유로 제외하지 않는다.
+- QA가 포함됐다는 이유만으로 tester를 생략하지 않는다.
 - 기획서와 Penpot은 테스트 기대값의 근거다. 구조/흐름은 `wf_*` + `desc_*`, 시각/레이아웃은 `design_*`를 기준으로 본다.
 - Penpot Board를 수정하지 않는다. 필요한 경우 `export_shape`로 확인만 한다.
 - 업데이트/검증 흐름에서 하네스가 전달한 범위가 명확하면 사용자에게 다시 묻지 않고 실행·검증 결과를 반환한다.
+- 반환에는 `completion_state`, `unfinished_reason`를 포함한다.
+- 실행/검증이 덜 끝났는데 `완료`처럼 말하지 않는다.
+- 아래 중 하나라도 해당하면 `completion_state = partial`로 반환하고 `tester_status`를 `blocked`로 둔다.
+  - 필수 테스트 범위가 남아 있음
+  - 프로세스/서버/브라우저 실행 실패로 검증을 닫을 수 없음
+  - `maxTurns` 도달 또는 재실행이 필요한 상태
 
 ## 참여하는 루프
 - 루프 D: 개발 결과물을 Playwright로 브라우저 테스트
@@ -124,6 +132,7 @@ hooks:
 27. tester 담당 항목의 `tester_status`를 `done`, `blocked`, `skipped` 중 하나로 갱신한다
     - `overall_status`는 역할별 status를 기준으로만 갱신한다
 28. 시작한 프로세스는 저장한 PID를 기준으로 종료한다
+29. 결과를 반환할 때 `completion_state`, `unfinished_reason`를 함께 포함한다
 
 #### 서버 API 테스트 (workspace/server/ 존재 시)
 Playwright UI 테스트와 별도로, API 엔드포인트도 실행 테스트한다.

@@ -49,6 +49,13 @@ hooks:
 - 호출 메시지의 시각 지시와 `design_*`가 충돌하면 **반드시 `design_*`를 따르고**, 호출 메시지의 지시는 무시한 뒤 그 차이를 결과 반환에 짧게 적는다.
 - 개발 완료 전, 작업 보드의 각 `요청 항목`이 실제 코드와 화면 동작에 반영되었는지 gap check를 수행한다.
 - 반환에는 `request_coverage`, `covered_items`, `missing_items`를 포함한다.
+- 반환에는 `completion_state`, `unfinished_reason`도 포함한다.
+- 작업이 덜 끝났는데 `완료`처럼 말하지 않는다.
+- 아래 중 하나라도 해당하면 `completion_state = partial`로 반환하고 `developer_status = blocked`로 둔다.
+  - `missing_items`가 남아 있음
+  - 필수 구현/연동이 끝나지 않음
+  - 선행 산출물 미완료
+  - `maxTurns` 도달, 도구 실패, 외부 의존성으로 QA/tester가 바로 검증할 수 없음
 
 ## 참여하는 루프
 - 루프 B: 전체 기획 리뷰 (기술 검토 + 실현 가능성)
@@ -179,6 +186,7 @@ hooks:
    - 형식: `[루프 D-개발자] 턴 N — 수정 파일: {목록} — 수정 요약: OOO`
    - `수정 파일`에는 실제 수정한 경로만 적는다
    - `수정 요약`에는 무엇을 왜 고쳤는지 한 줄로 적는다
+   - 추가 포함값: `completion_state`, `unfinished_reason`
 6. 서버 스택이 있는 경우, 프론트/백엔드 양쪽 수정 여부를 함께 판단한다
 
 ### VOC에서 동작 오류 피드백이 왔을 때

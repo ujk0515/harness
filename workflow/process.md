@@ -173,6 +173,10 @@
 #### 작업 보드 상태 수명주기
 - 상태값은 모든 컬럼에서 `todo`, `in_progress`, `done`, `blocked`, `skipped`만 사용한다.
 - 하네스는 새 요청을 작업 보드에 반영한 직후 모든 신규 항목의 `overall_status`를 `todo`로 기록한다.
+- 하네스는 **필수 에이전트 배치 시점에** 아래 불변식을 먼저 적용한다.
+  - `developer`가 필수인 항목은 `tester`도 **반드시 같은 항목의 필수 에이전트**에 포함한다.
+  - 코드 수정/구현이 예상되는 항목은 시간 절약, 경량 변경, 빠른 확인을 이유로 `tester`를 제외하지 않는다.
+  - `QA`를 포함했다는 사실은 `tester`를 생략하는 근거가 아니다. `QA-only` 배치는 코드 변경 항목에서 유효하지 않다.
 - 하네스는 필수 에이전트에 포함되지 않은 역할의 상태 컬럼을 즉시 `skipped`로 기록한다.
 - 각 에이전트는 **자기 작업을 시작할 때 자기 status 컬럼만** `in_progress`로 바꾼다.
 - 각 에이전트는 **자기 작업이 끝날 때 자기 status 컬럼만** 아래 중 하나로 닫는다.
@@ -187,6 +191,20 @@
 - 선행 조건 확인은 `overall_status`가 아니라 **역할별 status 컬럼** 기준으로 한다.
 - 어떤 역할이든 선행 역할의 status가 `done` 또는 `skipped`가 아니면 다음 필수 역할로 넘길 수 없다.
 - 하네스는 각 루프 종료 시 `request-workboard.md`를 다시 읽어 미닫힌 항목이 없는지 확인한다.
+
+#### 루프 완료 / 미완료 게이트
+- 하네스는 에이전트의 서술형 문장만 보고 `완료`를 판단하지 않는다. **반드시 역할별 status + 명시적 완료 신호**를 함께 확인한다.
+- 각 에이전트는 반환값에 아래를 포함한다.
+  - `completion_state`: `complete` | `partial`
+  - `unfinished_reason`: `partial`일 때 사유
+- 아래 중 하나라도 해당하면 해당 역할은 **미완료**로 본다.
+  - 필수 담당 항목의 자기 status가 `done` 또는 `skipped`가 아님
+  - `completion_state = partial`
+  - `missing_items`가 남아 있음
+  - `maxTurns` 도달, 도구 실패, 외부 의존성 때문에 다음 역할이 바로 이어질 수 없음
+- 미완료 역할이 하나라도 있으면 현재 루프는 `완료`가 아니다.
+- 미완료 상태에서는 다음 루프로 넘어가지 않고, 하네스는 해당 역할을 다시 호출하거나 `blocked` 사유를 정리한 뒤 같은 루프 안에서 이어간다.
+- `루프 완료`, `개발 완료`, `최종 완료` 같은 문구는 **필수 역할이 모두 `done` 또는 `skipped`이고 `completion_state = complete`일 때만** 사용한다.
 
 #### 요구사항 반영 점검 (gap check)
 - 하네스는 별도 gap test 문서를 만들지 않는다. **작업 보드의 `요청 항목` + 최신 기획서/산출물**을 기준으로 각 단계에서 반영 여부를 점검한다.
@@ -388,11 +406,19 @@
 ### 루프 C: 개발 + 테스트케이스 작성 (동시 진행)
 1. Agent(developer) 호출: "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md. `wf_*`, `desc_*`, `design_*`를 참조하여 프론트엔드 개발해 (workspace/development/). 서버 스택이 있으면 workspace/server/에 서버도 개발해. 구현 완료 전 각 `요청 항목`이 코드와 화면 동작에 반영되었는지 gap check하고 `request_coverage`를 반환해"
 2. Agent(qa) 호출: "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md. `wf_*`, `desc_*`, `design_*`를 확인해. 테스트케이스 작성해 (프론트 + 서버 API 둘 다)"
-3. Agent(secretary) 호출: "루프 C 완료 기록. 개발 산출물과 테스트케이스 경로를 기준으로 이번 루프 요약을 agent-log에 기록해"
+3. 하네스가 developer / QA 반환값과 작업 보드의 `developer_status`, `qa_status`를 함께 확인한다
+   - 현재 요청 배치에 `developer`가 필수인데 `tester_status = skipped`로 기록돼 있으면 배치 오류다. 하네스는 이를 자동 수정하고 tester를 같은 배치의 필수 역할로 복구한 뒤 진행한다.
+   - 둘 중 하나라도 `completion_state = partial`이거나 status가 `done` / `skipped`가 아니면 루프 C는 **미완료**다
+   - 이 경우 Agent(secretary) 호출: "루프 C 중간 기록. 미완료 역할과 남은 항목을 기준으로 agent-log에 기록해"
+   - 하네스는 미완료 역할을 같은 루프 C 안에서 다시 호출한다. 다음 루프로 넘어가지 않는다
+4. developer와 QA가 모두 `completion_state = complete`이고 필수 항목 status가 `done` 또는 `skipped`이면:
+   - Agent(secretary) 호출: "루프 C 완료 기록. 개발 산출물과 테스트케이스 경로를 기준으로 이번 루프 요약을 agent-log에 기록해"
+   - 루프 C 완료
 
 ### 루프 D: 개발 ↔ 검증
 1. Agent(qa) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로} + planner/designer/developer request_coverage. 코드 정적 분석으로 검증해"
 2. Agent(tester) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로} + planner/designer/developer request_coverage. Playwright로 브라우저 실행 테스트해"
+   - 요청 배치에 `developer`가 필수였던 항목은 기본적으로 tester도 필수다. 시간 절약을 이유로 tester를 생략하지 않는다.
 3. QA(정적 분석) + 테스터(브라우저 실행) 점수 종합 (둘 중 낮은 점수 기준)
 4. 통과 기준 미만 → **위 `이슈 분류 / 라우팅 규약`의 `[분류]` 값 기준으로 분기한다**
    - `기획 문제` → Agent(planner) 수정 → `wf_*` / `desc_*` 영향 있으면 Agent(designer)로 `design_*` 재동기화 → 루프 C-1번으로
@@ -402,7 +428,11 @@
    - Agent(qa) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분}. 수정된 부분 확인 + 회귀 없는지 체크해"
    - Agent(tester) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분}. 수정된 부분 Playwright로 재테스트 + 기존 PASS 항목 회귀 체크해"
    - 3번으로
-6. 통과 기준 이상:
+6. 통과 기준 이상이어도 하네스가 QA / tester 반환값과 작업 보드의 `qa_status`, `tester_status`를 함께 확인한다
+   - 둘 중 하나라도 `completion_state = partial`이거나 status가 `done` / `skipped`가 아니면 루프 D는 **미완료**다
+   - 이 경우 Agent(secretary) 호출: "루프 D 중간 기록. 미완료 역할과 남은 항목을 기준으로 agent-log에 기록해"
+   - 하네스는 미완료 역할을 같은 루프 D 안에서 다시 호출한다
+7. QA와 tester가 모두 `completion_state = complete`이고 필수 항목 status가 `done` 또는 `skipped`이면:
    - Agent(secretary) 호출: "루프 D 완료 기록. QA/테스터 점수와 미해결 이슈를 기준으로 이번 루프 요약을 agent-log에 기록해"
    - 루프 D 완료
 
@@ -417,10 +447,12 @@
 3. 실패 있음 → 이슈 분류 후 해당 에이전트에게 수정 요청 → 재실행
 
 ### 마무리
-1. 하네스가 전체 소요 시간, 에이전트별 토큰 사용량, 단계별 점수, `screen_id` 목록, variant 목록, Penpot Board 현황 집계를 함께 정리한다
+1. 하네스는 최종 완료 전에 마지막으로 작업 보드를 읽고, 현재 요청 배치의 필수 항목이 모두 `done` 또는 `skipped`인지 확인한다
+   - 하나라도 `todo`, `in_progress`, `blocked`면 최종 완료를 선언하지 않고 해당 루프로 되돌린다
+2. 하네스가 전체 소요 시간, 에이전트별 토큰 사용량, 단계별 점수, `screen_id` 목록, variant 목록, Penpot Board 현황 집계를 함께 정리한다
    - Penpot Board 현황 집계는 planner/designer 반환값, QA의 Board 존재 확인 결과, 최종 검증 결과를 종합해 만든다
-2. Agent(secretary) 호출: "secretary.md의 완료 리포트 포맷에 따라 정리해. 총 소요 시간: {X분}, 에이전트별 토큰: {내역}, 단계별 점수: {내역}, `screen_id` 목록: {내역}, variant 목록: {내역}, Penpot Board 현황: {내역}"
-3. 사용자에게 완료 리포트를 직접 출력한다 (파일 저장도 하지만, 화면에도 표시)
+3. Agent(secretary) 호출: "secretary.md의 완료 리포트 포맷에 따라 정리해. 총 소요 시간: {X분}, 에이전트별 토큰: {내역}, 단계별 점수: {내역}, `screen_id` 목록: {내역}, variant 목록: {내역}, Penpot Board 현황: {내역}"
+4. 사용자에게 완료 리포트를 직접 출력한다 (파일 저장도 하지만, 화면에도 표시)
 
 ## VOC / 업데이트 흐름
 
@@ -462,6 +494,7 @@ VOC/업데이트도 먼저 **요청 분해 + 작업 보드 갱신**을 수행한
 - 업데이트 흐름에서 "검토 후 진행할까요?", "다음 역할 넘길까요?" 같은 질문은 금지한다
 - 하네스가 외부 의존성, 요구사항 모호성, 기술적 불가능성을 발견한 경우에만 사용자에게 다시 묻는다
 - 상위 라우터는 UI-visible 변경 요청을 developer에게 직접 넘기지 않는다. 먼저 planner가 변경 화면과 `screen_id`를 확정해야 한다.
+- 상위 라우터는 **개발이 포함된 항목에서 tester를 임의로 빼지 않는다.** QA를 넣었다는 이유만으로 tester를 생략하지 않는다.
 
 ### developer 호출 입력 계약
 - 하네스가 developer를 호출할 때 **새 CSS 스펙, 픽셀 수치, 색상값, 레이아웃 구조, 컴포넌트 내부 배치 규칙을 직접 작성해서 넘기지 않는다.**

@@ -24,6 +24,7 @@ hooks:
 - 호출되면 지시받은 작업만 수행하고 결과를 반환한다.
 - **브라우저/서버를 실행하지 않는다.** 기획서, 테스트케이스, 구현 코드, Penpot 산출물을 읽고 정적으로 판단한다.
 - 실행 기반 검증(Playwright, 실제 클릭/입력, API 실행)은 tester 역할이다.
+- 코드 변경 항목에서 QA는 tester를 대체하지 않는다. QA가 들어갔다고 tester를 생략하면 안 된다.
 - **기획서(md)가 기능/동작의 정본(SSOT)**이다.
 - **Penpot 디자인이 화면/시각의 정본**이다.
 - 화면 구조와 흐름 검증은 기획서 + `wf_*` + `desc_*` 기준이다.
@@ -31,6 +32,11 @@ hooks:
 - QA는 Penpot Board를 수정하지 않지만, `wf_*`, `desc_*`, `design_*`를 검증 근거로 사용한다.
 - 이슈를 기록할 때는 반드시 어떤 정본을 기준으로 어긋났는지 함께 명시한다.
 - 업데이트/검증 흐름에서 하네스가 전달한 범위가 명확하면 사용자에게 다시 묻지 않고 검증 결과를 반환한다.
+- 반환에는 `completion_state`, `unfinished_reason`를 포함한다.
+- 검증이 덜 끝났는데 `완료`처럼 말하지 않는다.
+- 아래 중 하나라도 해당하면 `completion_state = partial`로 반환하고 `qa_status`를 `blocked`로 둔다.
+  - 필수 검토/TC/검증 범위가 남아 있음
+  - `maxTurns` 도달, 파일 누락, 외부 의존성 때문에 검증을 닫을 수 없음
 
 ## 호출되는 상황 3가지
 
@@ -100,6 +106,7 @@ hooks:
 11. QA 담당 항목의 `qa_status`를 `done`, `blocked`, `skipped` 중 하나로 갱신한다
     - `overall_status`는 역할별 status를 기준으로만 갱신한다
 12. 결과를 반환한다
+    - `completion_state`, `unfinished_reason`를 함께 포함한다
 
 ### 3. 개발 결과물 검증 요청 (루프 D)
 개발 결과물 경로 + 테스트케이스 경로와 함께 호출된다.
@@ -147,6 +154,7 @@ hooks:
 13. QA 담당 항목의 `qa_status`를 `done`, `blocked`, `skipped` 중 하나로 갱신한다
     - `overall_status`는 역할별 status를 기준으로만 갱신한다
 14. 점수 + 이슈 목록을 반환한다
+    - `completion_state`, `unfinished_reason`를 함께 포함한다
 15. 형식: `[루프 D-QA] 턴 N — 점수: XX점 — 부족한 부분: OOO`
 
 ## 결과물 저장

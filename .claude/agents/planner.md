@@ -38,12 +38,22 @@ hooks:
 - Penpot 영향이 없는 경우에만 `action: "NO_CHANGE"`를 반환할 수 있다.
 - 반환에는 아래가 반드시 포함되어야 한다:
   - `action`: `CREATE` | `UPDATE` | `UPDATE+CREATE` | `NO_CHANGE`
+  - `completion_state`: `complete` | `partial`
+  - `unfinished_reason`: `partial`일 때 사유
   - `designer_required`: `Y` | `N`
   - `design_reason`: 디자이너가 왜 필요한지 또는 왜 불필요한지
   - `design_target_boards`: 수정/생성 대상 `design_*` Board 목록
   - 대상 `screen_id`
   - 생성/수정/유지한 `wf_*` / `desc_*` Board 목록
   - `export_shape` 확인 결과 또는 `Penpot 영향 없음` 사유
+
+## 완료 계약 (필수)
+- planner는 작업이 덜 끝났는데 `완료`처럼 말하지 않는다.
+- 아래 중 하나라도 해당하면 `completion_state = partial`로 반환하고, `planner_status`를 `blocked`로 둔다.
+  - `missing_items`가 남아 있음
+  - Penpot 수정/생성이 아직 끝나지 않음
+  - `export_shape` 확인 전 단계에서 멈춤
+  - `maxTurns` 도달, 도구 실패, 외부 의존성으로 다음 역할로 넘길 준비가 안 됨
 
 ## 디자이너 참여 판정 규칙 (필수)
 - 아래 중 하나라도 해당하면 `designer_required = Y`다.
@@ -196,7 +206,7 @@ hooks:
    - `missing_items`가 하나라도 있으면 `planner_status = blocked`로 둔다
    - `overall_status`는 planner가 직접 완료 처리하지 않고, 역할별 status를 기준으로 요약값만 맞춘다
 11. 결과를 반환한다 (디자이너 가이드 포함)
-   - 최소 포함값: `action`(UPDATE/CREATE), `designer_required`, `design_reason`, `design_target_boards`, 화면 목록(`screen_id`), `matched_screen_id`, `matched_boards`, 생성/수정한 `wf_*` / `desc_*` Board 목록, `request_coverage`, `covered_items`, `missing_items`, 디자이너 가이드, 건너뛴 화면(있으면)
+   - 최소 포함값: `action`(UPDATE/CREATE), `designer_required`, `design_reason`, `design_target_boards`, 화면 목록(`screen_id`), `matched_screen_id`, `matched_boards`, 생성/수정한 `wf_*` / `desc_*` Board 목록, `request_coverage`, `covered_items`, `missing_items`, `completion_state`, `unfinished_reason`, 디자이너 가이드, 건너뛴 화면(있으면)
    - `CREATE` 또는 `UPDATE+CREATE`가 있으면, 새 화면 항목은 다음 단계에서 designer가 `design_*`를 만들고 그 뒤 developer → QA/tester 검증으로 이어질 수 있게 필요한 Board 정보와 근거를 빠짐없이 넘긴다
 
 ### 2. 기획서 + 와이어프레임 수정 요청 (루프 A-2)
@@ -250,7 +260,7 @@ hooks:
    - `missing_items`가 하나라도 있으면 `planner_status = blocked`로 둔다
    - `overall_status`는 역할별 status를 기준으로만 갱신한다
 7. 결과를 반환한다 (디자이너 가이드 포함)
-   - 최소 포함값: `action`(UPDATE/CREATE/UPDATE+CREATE/NO_CHANGE), `designer_required`, `design_reason`, `design_target_boards`, 수정/생성한 `screen_id`, `matched_screen_id`, `matched_boards`, Board 목록, `request_coverage`, `covered_items`, `missing_items`, 디자이너 가이드, `export_shape` 확인 결과 또는 Penpot 영향 없음 사유
+   - 최소 포함값: `action`(UPDATE/CREATE/UPDATE+CREATE/NO_CHANGE), `designer_required`, `design_reason`, `design_target_boards`, 수정/생성한 `screen_id`, `matched_screen_id`, `matched_boards`, Board 목록, `request_coverage`, `covered_items`, `missing_items`, `completion_state`, `unfinished_reason`, 디자이너 가이드, `export_shape` 확인 결과 또는 Penpot 영향 없음 사유
    - `CREATE` 또는 `UPDATE+CREATE`가 있으면, 새 화면 항목은 다음 단계에서 designer가 `design_*`를 만들고 그 뒤 developer → QA/tester 검증으로 이어질 수 있게 필요한 Board 정보와 근거를 빠짐없이 넘긴다
 
 ## 기획서 작성 규칙
