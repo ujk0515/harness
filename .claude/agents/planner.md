@@ -55,12 +55,29 @@ hooks:
   - `export_shape` 확인 전 단계에서 멈춤
   - `maxTurns` 도달, 도구 실패, 외부 의존성으로 다음 역할로 넘길 준비가 안 됨
 
+## 구조화 반환 일관성 계약 (필수)
+- `designer_required`, `design_reason`, `design_target_boards`, `action`, `completion_state`는 planner 반환의 **정본 필드**다.
+- 자연어 설명은 이 구조화 필드를 보조할 뿐이며, 구조화 필드를 약화하거나 뒤집을 수 없다.
+- planner는 아래 표현을 사용해 `designer_required = Y`를 사실상 무력화하면 안 된다.
+  - `"후속 루프에서 처리"`
+  - `"이번엔 문서만 반영"`
+  - `"디자인은 나중에"`
+  - `"일단 개발 먼저"`
+- 아래 중 하나라도 해당하면 반환은 무효이며, planner는 `completion_state = partial`, `planner_status = blocked`로 반환해야 한다.
+  - `designer_required = Y`인데 `design_target_boards`가 비어 있음
+  - `designer_required = Y`인데 자연어에서 디자이너를 미루거나 생략하라고 함
+  - `designer_required = N`인데 `design_target_boards`가 비어 있지 않음
+  - `action = NO_CHANGE`인데 실제로 `wf_*` / `desc_*`를 수정했음
+  - 구조화 필드와 `missing_items` / `export_shape` 결과가 서로 모순됨
+
 ## 디자이너 참여 판정 규칙 (필수)
 - 아래 중 하나라도 해당하면 `designer_required = Y`다.
   - 사용자가 화면에서 보게 되는 UI 구조, 상태, 레이아웃, 스타일, 문구, 지도, 마커, 검색 결과, 오버레이가 바뀜
+  - CSS만 수정되더라도 위치, 크기, 간격, 정렬, 강조, 플로팅, sticky/fixed 여부처럼 사용자가 보는 결과가 바뀜
   - `wf_*` 또는 `desc_*`를 새로 만들거나 수정함
   - 기존 `design_*`에 반영되지 않은 컴포넌트/상태/시각 요소가 생김
 - 서버/API만 바뀌고 사용자가 보는 화면이 그대로면 `designer_required = N`일 수 있다.
+- 내부 리팩터링, 테스트/배포 설정 변경, 사용자가 보지 못하는 스타일 정리처럼 **실제 화면 결과가 안 바뀌는 경우에만** `designer_required = N`을 허용한다.
 - `designer_required = N`일 때도 그 이유를 `design_reason`에 반드시 명시한다.
 
 ## 화면 영향도 분석 (모든 작업의 필수 선행 절차)
@@ -177,6 +194,9 @@ hooks:
 - covered_items: 반영 완료된 `item_id`
 - missing_items: 미반영 또는 불명확한 `item_id` + 사유
 ```
+
+- `designer_required = Y`이면 디자이너 가이드 안에서 디자이너 생략/유예 표현을 쓰지 않는다.
+- `designer_required = N`이면 `design_target_boards`는 빈 값이어야 하고, designer 스킵 가능 근거를 `design_reason`에 명시한다.
 
 ---
 

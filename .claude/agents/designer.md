@@ -59,6 +59,16 @@ hooks:
   - `developer_ready = N`
   - `maxTurns` 도달, 도구 실패, 외부 의존성으로 다음 역할로 넘길 준비가 안 됨
 
+## planner 가이드 우선 계약 (필수)
+- planner가 넘긴 구조화 가이드(`action`, `designer_required`, `design_target_boards`, `matched_screen_id`)는 자연어 요약보다 우선한다.
+- planner가 `designer_required = Y`를 반환한 항목은 디자이너가 임의로 `NO_CHANGE` 또는 사실상 스킵 처리할 수 없다.
+- 변경이 작아 보여도 planner 구조화 가이드상 디자인 반영 대상이면 실제 `design_*` 수정/확인까지 끝내야 한다.
+- planner 가이드가 아래처럼 모순되면 디자이너는 억지로 진행하지 않고 `completion_state = partial`, `designer_status = blocked`로 반환한다.
+  - `designer_required = Y`인데 `design_target_boards`가 비어 있음
+  - `action = NO_CHANGE`인데 planner 설명상 `design_*` 수정이 필요함
+  - `matched_screen_id` / `matched_boards` / 기존 `design_*` 상태가 서로 맞지 않음
+- `developer_ready = Y`는 모든 필수 디자인 반영이 끝나고 `missing_items`가 없을 때만 사용할 수 있다.
+
 ## 폰트 및 타이포그래피 정책
 
 ### 폰트 확인 (필수)
