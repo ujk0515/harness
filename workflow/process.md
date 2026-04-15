@@ -258,6 +258,24 @@
 - 미완료 상태에서는 다음 루프로 넘어가지 않고, 하네스는 해당 역할을 다시 호출하거나 `blocked` 사유를 정리한 뒤 같은 루프 안에서 이어간다.
 - `루프 완료`, `개발 완료`, `최종 완료` 같은 문구는 **필수 역할이 모두 `done` 또는 `skipped`이고 `completion_state = complete`일 때만** 사용한다.
 
+#### QA / tester 파일 우선 완료 판정
+- QA와 tester는 긴 본문 반환보다 **보고서 파일 + 상태 요약 파일**이 우선 증거다.
+- 하네스는 QA/tester 호출 직전에 대상 보고서 파일과 상태 요약 파일의 기존 `mtime`을 기록한다.
+- 호출 후 아래를 모두 만족하면, 반환 본문이 짧거나 일부 잘렸더라도 **작업 완료로 간주할 수 있다.**
+  - 상태 요약 파일이 존재한다
+  - 상태 요약 파일의 `completion_state = complete`
+  - 상태 요약 파일의 `report_path`가 유효하다
+  - 해당 보고서 파일의 `mtime`이 호출 직전보다 최신이다
+- 이 경우 하네스는 같은 작업을 즉시 재호출하지 않고, 보고서 파일을 읽어 다음 루프로 진행한다.
+- 반대로 반환이 애매해도 상태 요약 파일/보고서 파일이 갱신되지 않았으면 완료로 간주하지 않는다.
+- QA/tester의 긴 이슈 목록, Penpot 근거, PASS 상세는 반환 본문이 아니라 보고서 파일에서 읽는다.
+
+#### QA / tester 재호출 규칙
+- QA/tester가 `completion_state = partial`이거나 상태 파일의 `resume_from` / `phase`가 미완료 지점을 가리키면, 하네스는 **같은 루프 안에서만** 재호출한다.
+- 재호출 시 하네스는 직전 상태 파일 경로를 함께 전달하고, 이미 완료한 단계는 반복하지 말고 해당 지점부터 이어서 하라고 명시한다.
+- 같은 항목에서 QA/tester 자동 재호출은 기본적으로 **최대 2회**까지 허용한다.
+- 2회 재호출 후에도 보고서 파일 갱신 또는 `completion_state = complete` 증거가 없으면 해당 역할을 `blocked`로 유지하고 다음 루프로 넘기지 않는다.
+
 #### 요구사항 반영 점검 (gap check)
 - 하네스는 별도 gap test 문서를 만들지 않는다. **작업 보드의 `요청 항목` + 최신 기획서/산출물**을 기준으로 각 단계에서 반영 여부를 점검한다.
 - 각 역할은 자기 status를 `done`으로 닫기 전에, 자기 담당 항목이 실제 산출물에 반영됐는지 직접 대조해야 한다.
@@ -320,6 +338,7 @@
 | 기술 검토 | workspace/reports/B-tech-review.md | 개발자 | |
 | QA 기획 검토 | workspace/reports/B-qa-review.md | QA | |
 | 테스트케이스 | workspace/testing/C-testcases.md | QA | |
+| QA 상태/요약 | workspace/reports/.qa-last-run.json | QA | 경량 반환 대체용 |
 | 프론트엔드 프로젝트 | workspace/development/ | 개발자 | 프론트 스택에 맞는 실제 구조 허용 |
 | 서버 엔트리 | workspace/server/index.js | 개발자 | 서버 스택 있을 때 |
 | 서버 라우트 | workspace/server/routes/ | 개발자 | API 엔드포인트 |
@@ -331,9 +350,12 @@
 | QA 검증 결과 | workspace/reports/D-qa-verification.md | QA | |
 | Playwright 테스트 | workspace/testing/playwright/ | 테스터 | 브라우저 실행 테스트 |
 | Playwright 결과 JSON | workspace/reports/playwright-results.json | 테스터 | Playwright reporter 산출물 |
+| Playwright 실행 로그 | workspace/reports/playwright-run.log | 테스터 | stdout/stderr 축약 로그 |
 | 테스터 검증 결과 | workspace/reports/D-tester-verification.md | 테스터 | |
 | 통합테스트 결과 | workspace/reports/E-integration-test.md | 테스터 | 배포 전 최종 검증 |
 | 통합테스트 코드 | workspace/testing/playwright/integration.spec.js | 테스터 | 전체 시나리오 |
+| 테스터 진행 상태 | workspace/testing/.tester-state.json | 테스터 | 재개 지점 기록 |
+| 테스터 상태/요약 | workspace/reports/.tester-last-run.json | 테스터 | 경량 반환 대체용 |
 | 에이전트 로그 | workspace/reports/agent-log.txt | 비서 | 접두사 없음 |
 | 최종 보고서 | workspace/reports/final-report.md | 비서 | 접두사 없음 |
 
@@ -458,8 +480,9 @@
 
 ### 루프 C: 개발 + 테스트케이스 작성 (동시 진행)
 1. Agent(developer) 호출: "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md. `wf_*`, `desc_*`, `design_*`를 참조하여 프론트엔드 개발해 (workspace/development/). 서버 스택이 있으면 workspace/server/에 서버도 개발해. 구현 완료 전 각 `요청 항목`이 코드와 화면 동작에 반영되었는지 gap check하고 `request_coverage`를 반환해"
-2. Agent(qa) 호출: "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md. `wf_*`, `desc_*`, `design_*`를 확인해. 테스트케이스 작성해 (프론트 + 서버 API 둘 다)"
+2. Agent(qa) 호출: "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md + 직전 QA 상태: workspace/reports/.qa-last-run.json. `wf_*`, `desc_*`, `design_*`를 확인해. 테스트케이스 작성해 (프론트 + 서버 API 둘 다). 상세는 파일에 저장하고 반환은 경량 요약만 해"
 3. 하네스가 developer / QA 반환값과 작업 보드의 `developer_status`, `qa_status`를 함께 확인한다
+   - QA 반환이 짧거나 일부 잘렸더라도 `workspace/reports/.qa-last-run.json`과 `workspace/testing/C-testcases.md`가 최신이면 파일 우선 규칙으로 완료 여부를 판단한다
    - 현재 요청 배치에 `developer`가 필수인데 `tester_status = skipped`로 기록돼 있으면 배치 오류다. 하네스는 이를 자동 수정하고 tester를 같은 배치의 필수 역할로 복구한 뒤 진행한다.
    - 둘 중 하나라도 `completion_state = partial`이거나 status가 `done` / `skipped`가 아니면 루프 C는 **미완료**다
    - 이 경우 Agent(secretary) 호출: "루프 C 중간 기록. 미완료 역할과 남은 항목을 기준으로 agent-log에 기록해"
@@ -469,8 +492,8 @@
    - 루프 C 완료
 
 ### 루프 D: 개발 ↔ 검증
-1. Agent(qa) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로} + planner/designer/developer request_coverage. 코드 정적 분석으로 검증해"
-2. Agent(tester) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로} + planner/designer/developer request_coverage. Playwright로 브라우저 실행 테스트해"
+1. Agent(qa) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로} + planner/designer/developer request_coverage + 직전 QA 상태: workspace/reports/.qa-last-run.json. 코드 정적 분석으로 검증해. 상세는 파일에 저장하고 반환은 경량 요약만 해"
+2. Agent(tester) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로} + planner/designer/developer request_coverage + 직전 테스터 상태: workspace/testing/.tester-state.json + 직전 테스터 요약: workspace/reports/.tester-last-run.json. Playwright로 브라우저 실행 테스트해. 상세는 파일에 저장하고 반환은 경량 요약만 해"
    - 요청 배치에 `developer`가 필수였던 항목은 기본적으로 tester도 필수다. 시간 절약을 이유로 tester를 생략하지 않는다.
 3. QA(정적 분석) + 테스터(브라우저 실행) 점수 종합 (둘 중 낮은 점수 기준)
 4. 통과 기준 미만 → **위 `이슈 분류 / 라우팅 규약`의 `[분류]` 값 기준으로 분기한다**
@@ -478,10 +501,12 @@
    - `화면 문제` → Agent(designer) 수정 후 필요 시 Agent(planner) 확인 → 루프 C-1번으로
    - `동작 오류` → Agent(developer) 수정 → 5번으로
 5. **재검증 (턴 2 이후):** 하네스가 이전 이슈 목록 + 개발자 수정 내역을 함께 전달한다
-   - Agent(qa) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분}. 수정된 부분 확인 + 회귀 없는지 체크해"
-   - Agent(tester) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분}. 수정된 부분 Playwright로 재테스트 + 기존 PASS 항목 회귀 체크해"
+   - Agent(qa) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분} + 직전 QA 상태: workspace/reports/.qa-last-run.json. 수정된 부분 확인 + 회귀 없는지 체크해. 상세는 파일에 저장하고 반환은 경량 요약만 해"
+   - Agent(tester) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분} + 직전 테스터 상태: workspace/testing/.tester-state.json + 직전 테스터 요약: workspace/reports/.tester-last-run.json. 수정된 부분 Playwright로 재테스트 + 기존 PASS 항목 회귀 체크해. 상세는 파일에 저장하고 반환은 경량 요약만 해"
    - 3번으로
 6. 통과 기준 이상이어도 하네스가 QA / tester 반환값과 작업 보드의 `qa_status`, `tester_status`를 함께 확인한다
+   - QA 반환이 짧거나 일부 잘렸더라도 `workspace/reports/.qa-last-run.json`과 `workspace/reports/D-qa-verification.md`가 최신이면 파일 우선 규칙으로 완료 여부를 판단한다
+   - tester 반환이 짧거나 일부 잘렸더라도 `workspace/reports/.tester-last-run.json`, `workspace/testing/.tester-state.json`, `workspace/reports/D-tester-verification.md`, `workspace/reports/playwright-results.json`이 최신이면 파일 우선 규칙으로 완료 여부를 판단한다
    - 둘 중 하나라도 `completion_state = partial`이거나 status가 `done` / `skipped`가 아니면 루프 D는 **미완료**다
    - 이 경우 Agent(secretary) 호출: "루프 D 중간 기록. 미완료 역할과 남은 항목을 기준으로 agent-log에 기록해"
    - 하네스는 미완료 역할을 같은 루프 D 안에서 다시 호출한다
@@ -495,7 +520,7 @@
 - 서버 + DB + 프론트가 모두 실행 중이어야 한다.
 - DB는 빈 상태에서 시작한다.
 
-1. Agent(tester) 호출: "통합테스트 실행. project-config.md + 기획서 + TC 전체를 참조. DB 초기화 후 적용 가능한 핵심 E2E 시나리오를 순서대로 실행해. 결과를 workspace/reports/E-integration-test.md에 저장해"
+1. Agent(tester) 호출: "통합테스트 실행. project-config.md + 기획서 + TC 전체를 참조. DB 초기화 후 적용 가능한 핵심 E2E 시나리오를 순서대로 실행해. 결과를 workspace/reports/E-integration-test.md에 저장해. 상세는 파일에 저장하고 반환은 경량 요약만 해. 직전 상태는 workspace/testing/.tester-state.json, workspace/reports/.tester-last-run.json을 참조해"
 2. 통합테스트 PASS율 100% + Blocker 0건 → 배포 가능
 3. 실패 있음 → 이슈 분류 후 해당 에이전트에게 수정 요청 → 재실행
 
