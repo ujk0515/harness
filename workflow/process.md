@@ -209,6 +209,53 @@
   - 필수 역할 status가 비어 있거나, 필수 에이전트 목록과 status 값이 서로 모순됨
 - 무효 반환이 나오면 하네스는 다음 역할을 호출하지 않고 같은 역할을 다시 호출하거나 `blocked` 사유를 정리한 뒤 같은 루프에서 해결한다.
 
+#### JSON 상태 / 티켓 게이트 (필수)
+- `workspace/planning/request-workboard.md`는 **사람 읽기용 보드**다. 기계 판정의 정본(SSOT)은 `workspace/planning/request-state.json`이다.
+- 하네스와 validator는 다음 항목의 진실값을 `request-state.json` 기준으로 판단한다.
+  - 역할별 `status`
+  - `attempt`
+  - `checklist`
+  - `claim_path`
+  - `done_ticket`
+  - `skip_ticket`
+  - `missing_items`
+- 에이전트는 `done ticket`을 직접 발급하지 않는다.
+  - 에이전트는 claim / evidence를 쓴다.
+  - validator가 체크리스트를 검사하고 통과 시 `done ticket`을 발급한다.
+- `request-workboard.md`의 `done`은 참고값일 뿐이다. `done ticket`이 없으면 다음 단계 입장권으로 인정하지 않는다.
+
+#### 작업명 규칙 (필수)
+- 하네스가 생성하는 task subject는 **반드시** 아래 형식을 따른다.
+  - `[Batch{N}][R{M}][role] subject`
+  - 예: `[Batch8][R17][tester] floating-button verification`
+- `TaskCreated` 훅은 이 형식을 어긴 task를 차단한다.
+- validator는 `task_subject`에서 `batch_id`, `item_id`, `role`을 파싱하여 상태 JSON과 티켓 경로를 찾는다.
+
+#### claim / evidence / ticket 규칙
+- 각 역할은 작업 종료 직전 아래 산출물을 남긴다.
+  - claim: `workspace/claims/{batch_id}/{item_id}/{role}.claim.json`
+  - evidence: `workspace/evidence/{role}/{batch_id}/{item_id}/...`
+- validator는 아래를 발급/기각한다.
+  - 통과: `workspace/tickets/{batch_id}/{item_id}/{role}.done.json`
+  - 거절: `workspace/tickets/{batch_id}/{item_id}/{role}.rejected.json`
+  - 면제: `workspace/tickets/{batch_id}/{item_id}/{role}.skip.json`
+- `skipped`도 ticket이 있어야만 유효하다. `skip ticket` 없는 `skipped`는 무효다.
+
+#### Hook 기반 하드 게이트
+- 하네스는 Claude Code hook으로 다음 3단 게이트를 사용한다.
+  - `TaskCreated`: subject 규칙 + predecessor ticket 검사
+  - `TaskCompleted`: 체크리스트 검사 후 `done ticket` 발급 또는 완료 차단
+  - `TeammateIdle`: ticket 없는 상태로 역할이 쉬는 것을 차단
+- 보조 관측용으로 `SubagentStart`, `SubagentStop`도 로그를 남긴다.
+- 이 게이트는 `workflow/checklists/task-gate-checklists.json`과 `request-state.json`을 기준으로 동작한다.
+
+#### 루프백 / 재시도 규칙
+- 체크리스트 항목 중 1개라도 실패하면 validator는 `done ticket`을 발급하지 않는다.
+- `TaskCompleted`가 차단되면 같은 역할은 **완료로 닫히지 않으며**, 누락 항목을 받은 상태로 다시 루프를 돈다.
+- 다음 역할은 predecessor 역할의 `done ticket` 또는 `skip ticket`이 없으면 `TaskCreated` 단계에서 생성 자체가 차단된다.
+- 기본 재시도 상한은 항목별 `retry_limit = 3`이다.
+- 상한을 넘겨도 ticket이 발급되지 않으면 하네스는 해당 항목을 `blocked`로 유지하고 사용자에게 에스컬레이션한다.
+
 #### 에이전트 호출 전 차단 게이트
 - 하네스는 **모든 에이전트 호출 직전** 현재 요청 배치의 작업 보드를 다시 읽고, 대상 항목별 선행 역할 status를 검사한다.
 - 검사 순서:
@@ -224,6 +271,7 @@
   - designer가 필요한 항목인데 `designer_status = skipped`면 호출 금지
   - designer가 완료됐더라도 `developer_ready = Y`가 아니면 호출 금지
 - QA/tester 호출 전에도 같은 방식으로 developer `completion_state`, 역할 status, `missing_items`를 함께 확인한다.
+- 단, 최종 하드 게이트는 `status`보다 `done ticket` / `skip ticket`이다. status가 `done`이어도 ticket이 없으면 호출 금지다.
 
 #### skipped 사용 규칙
 - `skipped`는 편의상 넘기는 값이 아니다. **명시적 면제**가 있는 경우에만 허용한다.
@@ -329,6 +377,7 @@
 |--------|------|------|------|
 | 프로젝트 설정 | workspace/planning/project-config.md | 하네스 | 접두사 없음 |
 | 요청 작업 보드 | workspace/planning/request-workboard.md | 하네스 | 신규/업데이트 공통 작업 분해 보드 |
+| 요청 상태 JSON | workspace/planning/request-state.json | 하네스/validator | 기계 판정 SSOT |
 | 벤치마킹 | workspace/planning/A-benchmark.md | 하네스 | 사전 단계 |
 | 기획서 | workspace/planning/A-planning-doc.md | 기획자 | |
 | Penpot 화면 와이어프레임 | Penpot 프로젝트 내 `wf_[screen_id]` Board | 기획자 | 화면 구조 정본 |
@@ -339,6 +388,11 @@
 | QA 기획 검토 | workspace/reports/B-qa-review.md | QA | |
 | 테스트케이스 | workspace/testing/C-testcases.md | QA | |
 | QA 상태/요약 | workspace/reports/.qa-last-run.json | QA | 경량 반환 대체용 |
+| Claim 파일 | workspace/claims/{batch_id}/{item_id}/{role}.claim.json | 각 역할 | validator 입력 |
+| Evidence 파일 | workspace/evidence/{role}/{batch_id}/{item_id}/ | 각 역할 | validator 입력 |
+| Done ticket | workspace/tickets/{batch_id}/{item_id}/{role}.done.json | validator | 다음 단계 입장권 |
+| Skip ticket | workspace/tickets/{batch_id}/{item_id}/{role}.skip.json | validator | 정당한 생략 입장권 |
+| Rejected ticket | workspace/tickets/{batch_id}/{item_id}/{role}.rejected.json | validator | 체크 실패 기록 |
 | 프론트엔드 프로젝트 | workspace/development/ | 개발자 | 프론트 스택에 맞는 실제 구조 허용 |
 | 서버 엔트리 | workspace/server/index.js | 개발자 | 서버 스택 있을 때 |
 | 서버 라우트 | workspace/server/routes/ | 개발자 | API 엔드포인트 |
@@ -357,6 +411,7 @@
 | 테스터 진행 상태 | workspace/testing/.tester-state.json | 테스터 | 재개 지점 기록 |
 | 테스터 상태/요약 | workspace/reports/.tester-last-run.json | 테스터 | 경량 반환 대체용 |
 | 에이전트 로그 | workspace/reports/agent-log.txt | 비서 | 접두사 없음 |
+| Hook 이벤트 로그 | workspace/reports/hook-events.jsonl | validator | Task/Subagent 실측 로그 |
 | 최종 보고서 | workspace/reports/final-report.md | 비서 | 접두사 없음 |
 
 ### 규칙

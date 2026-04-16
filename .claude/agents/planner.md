@@ -55,6 +55,29 @@ hooks:
   - `export_shape` 확인 전 단계에서 멈춤
   - `maxTurns` 도달, 도구 실패, 외부 의존성으로 다음 역할로 넘길 준비가 안 됨
 
+## claim / evidence / ticket 규칙 (필수)
+- planner는 작업 종료 직전에 아래를 남긴다.
+  - claim: `workspace/claims/{batch_id}/{item_id}/planner.claim.json`
+  - evidence: `workspace/evidence/planner/{batch_id}/{item_id}/...`
+- claim에는 최소 아래를 포함한다.
+  - `batch_id`, `item_id`, `role`
+  - `completion_state`, `unfinished_reason`
+  - `request_coverage`, `covered_items`, `missing_items`
+  - 수정/생성한 `wf_*` / `desc_*` 목록
+  - `export_shape` 확인 결과 요약
+- planner는 `done ticket`을 직접 만들지 않는다. validator가 체크리스트를 검사해 `planner.done.json`을 발급한다.
+- `planner_status = done`은 claim/evidence를 남기고 자가 점검을 통과한 경우에만 사용한다.
+
+## 자가 점검 관문 (필수)
+- planner는 종료 직전에 `workflow/checklists/task-gate-checklists.md`의 planner 체크를 다시 확인한다.
+- 아래 중 1개라도 실패하면 `planner_status = blocked`, `completion_state = partial`로 두고 종료한다.
+  - 기획서 파일 존재
+  - planner claim 존재
+  - `wf_*` evidence 존재
+  - `desc_*` evidence 존재
+  - `request-state.json`의 planner status 갱신
+- 체크를 통과하기 전에는 다음 역할 입장권이 열리지 않는다고 가정하고 작업한다.
+
 ## 구조화 반환 일관성 계약 (필수)
 - `designer_required`, `design_reason`, `design_target_boards`, `action`, `completion_state`는 planner 반환의 **정본 필드**다.
 - 자연어 설명은 이 구조화 필드를 보조할 뿐이며, 구조화 필드를 약화하거나 뒤집을 수 없다.

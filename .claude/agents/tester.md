@@ -76,6 +76,28 @@ hooks:
   - `resume_from` (재개 필요 시)
 - 재호출되면 먼저 상태 파일을 읽고, 이미 끝난 단계는 반복하지 말고 이어서 진행한다.
 
+## claim / evidence / ticket 규칙 (필수)
+- tester는 작업 종료 직전에 아래를 남긴다.
+  - claim: `workspace/claims/{batch_id}/{item_id}/tester.claim.json`
+  - evidence: `workspace/evidence/tester/{batch_id}/{item_id}/...`
+- claim에는 최소 아래를 포함한다.
+  - `batch_id`, `item_id`, `role`
+  - `completion_state`, `unfinished_reason`
+  - `tester_status`, `executed_scope`
+  - Playwright 결과/로그/보고 경로
+- tester는 `done ticket`을 직접 만들지 않는다. validator가 체크리스트를 검사해 `tester.done.json`을 발급한다.
+- `tester_status = done`은 claim/evidence를 남기고 자가 점검을 통과한 경우에만 사용한다.
+
+## 자가 점검 관문 (필수)
+- tester는 종료 직전에 `workflow/checklists/task-gate-checklists.md`의 tester 체크를 다시 확인한다.
+- 아래 중 1개라도 실패하면 `tester_status = blocked`, `completion_state = partial`로 두고 종료한다.
+  - tester claim 존재
+  - Playwright spec 존재
+  - Playwright JSON 결과 존재
+  - tester 보고 존재
+  - `request-state.json`의 tester status 갱신
+- 체크를 통과하기 전에는 다음 단계 입장권이 열리지 않는다고 가정하고 작업한다.
+
 ## 참여하는 루프
 - 루프 D: 개발 결과물을 Playwright로 브라우저 테스트
 

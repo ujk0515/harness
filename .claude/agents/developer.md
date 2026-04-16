@@ -60,6 +60,29 @@ hooks:
   - 선행 산출물 미완료
   - `maxTurns` 도달, 도구 실패, 외부 의존성으로 QA/tester가 바로 검증할 수 없음
 
+## claim / evidence / ticket 규칙 (필수)
+- developer는 작업 종료 직전에 아래를 남긴다.
+  - claim: `workspace/claims/{batch_id}/{item_id}/developer.claim.json`
+  - evidence: `workspace/evidence/developer/{batch_id}/{item_id}/...`
+- claim에는 최소 아래를 포함한다.
+  - `batch_id`, `item_id`, `role`
+  - `completion_state`, `unfinished_reason`
+  - `request_coverage`, `covered_items`, `missing_items`
+  - 수정한 코드 경로 목록
+  - 실행/검증에 사용한 명령 요약
+- developer는 `done ticket`을 직접 만들지 않는다. validator가 체크리스트를 검사해 `developer.done.json`을 발급한다.
+- `developer_status = done`은 claim/evidence를 남기고 자가 점검을 통과한 경우에만 사용한다.
+
+## 자가 점검 관문 (필수)
+- developer는 종료 직전에 `workflow/checklists/task-gate-checklists.md`의 developer 체크를 다시 확인한다.
+- 아래 중 1개라도 실패하면 `developer_status = blocked`, `completion_state = partial`로 두고 종료한다.
+  - developer claim 존재
+  - `workspace/development/src` 산출물 존재
+  - 기술 검토/구현 보고 존재
+  - claim 안의 `covered_items` 존재
+  - `request-state.json`의 developer status 갱신
+- 체크를 통과하기 전에는 QA/tester 입장권이 열리지 않는다고 가정하고 작업한다.
+
 ## 참여하는 루프
 - 루프 B: 전체 기획 리뷰 (기술 검토 + 실현 가능성)
 - 루프 C: 개발

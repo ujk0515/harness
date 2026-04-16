@@ -59,6 +59,29 @@ hooks:
   - `developer_ready = N`
   - `maxTurns` 도달, 도구 실패, 외부 의존성으로 다음 역할로 넘길 준비가 안 됨
 
+## claim / evidence / ticket 규칙 (필수)
+- designer는 작업 종료 직전에 아래를 남긴다.
+  - claim: `workspace/claims/{batch_id}/{item_id}/designer.claim.json`
+  - evidence: `workspace/evidence/designer/{batch_id}/{item_id}/...`
+- claim에는 최소 아래를 포함한다.
+  - `batch_id`, `item_id`, `role`
+  - `completion_state`, `unfinished_reason`
+  - `developer_ready`, `developer_reason`, `developer_targets`
+  - `request_coverage`, `covered_items`, `missing_items`
+  - 수정/생성한 `design_*` Board 목록
+- designer는 `done ticket`을 직접 만들지 않는다. validator가 체크리스트를 검사해 `designer.done.json`을 발급한다.
+- `designer_status = done`은 claim/evidence를 남기고 자가 점검을 통과한 경우에만 사용한다.
+
+## 자가 점검 관문 (필수)
+- designer는 종료 직전에 `workflow/checklists/task-gate-checklists.md`의 designer 체크를 다시 확인한다.
+- 아래 중 1개라도 실패하면 `designer_status = blocked`, `completion_state = partial`로 두고 종료한다.
+  - designer claim 존재
+  - design export evidence 존재
+  - design board manifest 존재
+  - claim 안의 `developer_targets` 존재
+  - `request-state.json`의 designer status 갱신
+- 체크를 통과하기 전에는 developer 입장권이 열리지 않는다고 가정하고 작업한다.
+
 ## planner 가이드 우선 계약 (필수)
 - planner가 넘긴 구조화 가이드(`action`, `designer_required`, `design_target_boards`, `matched_screen_id`)는 자연어 요약보다 우선한다.
 - planner가 `designer_required = Y`를 반환한 항목은 디자이너가 임의로 `NO_CHANGE` 또는 사실상 스킵 처리할 수 없다.

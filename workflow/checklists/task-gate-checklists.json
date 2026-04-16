@@ -1,0 +1,167 @@
+{
+  "schema_version": "1.0.0-draft",
+  "roles": {
+    "planner": [
+      {
+        "id": "planning_doc_exists",
+        "label": "기획서 파일 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/planning/A-planning-doc.md"
+      },
+      {
+        "id": "planner_claim_exists",
+        "label": "planner claim 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/planner.claim.json"
+      },
+      {
+        "id": "wf_evidence_exists",
+        "label": "와이어프레임 evidence 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json"
+      },
+      {
+        "id": "desc_evidence_exists",
+        "label": "설명 Board evidence 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json"
+      },
+      {
+        "id": "planner_state_done",
+        "label": "request-state 내 planner status = done",
+        "command": "node .claude/scripts/validator.js check json_field_equals workspace/planning/request-state.json batches.{batch_index}.items.{item_index}.roles.{role_index}.status done"
+      }
+    ],
+    "designer": [
+      {
+        "id": "designer_claim_exists",
+        "label": "designer claim 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/designer.claim.json"
+      },
+      {
+        "id": "design_evidence_exists",
+        "label": "design export evidence 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/evidence/designer/{batch_id}/{item_id}/design-export.json"
+      },
+      {
+        "id": "design_board_manifest_exists",
+        "label": "대상 design board manifest 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/evidence/designer/{batch_id}/{item_id}/boards.json"
+      },
+      {
+        "id": "designer_targets_truthy",
+        "label": "claim 안에 developer_targets 존재",
+        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/designer.claim.json developer_targets"
+      },
+      {
+        "id": "designer_state_done",
+        "label": "request-state 내 designer status = done",
+        "command": "node .claude/scripts/validator.js check json_field_equals workspace/planning/request-state.json batches.{batch_index}.items.{item_index}.roles.{role_index}.status done"
+      }
+    ],
+    "developer": [
+      {
+        "id": "developer_claim_exists",
+        "label": "developer claim 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/developer.claim.json"
+      },
+      {
+        "id": "development_dir_has_entries",
+        "label": "프론트 산출물 디렉터리 비어있지 않음",
+        "command": "node .claude/scripts/validator.js check dir_has_entries workspace/development/src"
+      },
+      {
+        "id": "developer_report_exists",
+        "label": "기술 검토 또는 구현 보고 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/reports/B-tech-review.md"
+      },
+      {
+        "id": "developer_coverage_truthy",
+        "label": "claim 안에 covered_items 존재",
+        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/developer.claim.json covered_items"
+      },
+      {
+        "id": "developer_state_done",
+        "label": "request-state 내 developer status = done",
+        "command": "node .claude/scripts/validator.js check json_field_equals workspace/planning/request-state.json batches.{batch_index}.items.{item_index}.roles.{role_index}.status done"
+      }
+    ],
+    "qa": [
+      {
+        "id": "qa_claim_exists",
+        "label": "qa claim 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/qa.claim.json"
+      },
+      {
+        "id": "testcase_exists",
+        "label": "테스트케이스 파일 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/testing/C-testcases.md"
+      },
+      {
+        "id": "qa_summary_exists",
+        "label": "QA 상태 요약 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/reports/.qa-last-run.json"
+      },
+      {
+        "id": "qa_report_exists",
+        "label": "QA 검증 보고 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/reports/D-qa-verification.md"
+      },
+      {
+        "id": "qa_state_done",
+        "label": "request-state 내 qa status = done",
+        "command": "node .claude/scripts/validator.js check json_field_equals workspace/planning/request-state.json batches.{batch_index}.items.{item_index}.roles.{role_index}.status done"
+      }
+    ],
+    "tester": [
+      {
+        "id": "tester_claim_exists",
+        "label": "tester claim 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/tester.claim.json"
+      },
+      {
+        "id": "playwright_spec_exists",
+        "label": "Playwright spec 존재",
+        "command": "node .claude/scripts/validator.js check dir_has_entries workspace/testing/playwright"
+      },
+      {
+        "id": "playwright_result_exists",
+        "label": "Playwright JSON 결과 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/reports/playwright-results.json"
+      },
+      {
+        "id": "tester_report_exists",
+        "label": "tester 보고 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/reports/D-tester-verification.md"
+      },
+      {
+        "id": "tester_state_done",
+        "label": "request-state 내 tester status = done",
+        "command": "node .claude/scripts/validator.js check json_field_equals workspace/planning/request-state.json batches.{batch_index}.items.{item_index}.roles.{role_index}.status done"
+      }
+    ],
+    "secretary": [
+      {
+        "id": "final_report_exists",
+        "label": "최종 보고서 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/reports/final-report.md"
+      },
+      {
+        "id": "agent_log_exists",
+        "label": "agent log 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/reports/agent-log.txt"
+      },
+      {
+        "id": "final_report_has_summary",
+        "label": "최종 보고서에 요약 섹션 존재",
+        "command": "node .claude/scripts/validator.js check file_contains workspace/reports/final-report.md 요약"
+      },
+      {
+        "id": "secretary_claim_exists",
+        "label": "secretary claim 존재",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/secretary.claim.json"
+      },
+      {
+        "id": "secretary_state_done",
+        "label": "request-state 내 secretary status = done",
+        "command": "node .claude/scripts/validator.js check json_field_equals workspace/planning/request-state.json batches.{batch_index}.items.{item_index}.roles.{role_index}.status done"
+      }
+    ]
+  }
+}
