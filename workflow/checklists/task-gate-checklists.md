@@ -59,7 +59,6 @@
 - `workspace/claims/{batch_id}/{item_id}/developer.claim.json`가 현재 시도 이후 갱신
 - claim의 `covered_items`에 현재 `item_id` 포함
 - `workspace/evidence/developer/{batch_id}/{item_id}/`에 현재 시도 이후 evidence 존재
-- `workspace/reports/B-tech-review.md`가 현재 시도 이후 갱신
 - `request-state.json`의 developer status가 `done`
 
 ### QA

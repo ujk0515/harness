@@ -14,7 +14,7 @@ const DEFAULT_ROLE_ORDER = [
   "tester",
   "secretary",
 ];
-const STATE_SCHEMA_VERSION = "1.2.0-draft";
+const STATE_SCHEMA_VERSION = "1.3.0-draft";
 const DISPATCH_SCHEMA_VERSION = "1.0.0-draft";
 const DISPATCH_TERMINAL_STATUSES = new Set(["completed", "blocked", "rejected"]);
 const STALE_PENDING_WITHOUT_AGENT_MS = 30 * 1000;
@@ -121,6 +121,30 @@ function defaultTicketState() {
   };
 }
 
+function defaultReviewGateState() {
+  return {
+    status: "idle",
+    opened_at: null,
+    resolved_at: null,
+    developer_review: "todo",
+    qa_review: "todo",
+    planner_response: "todo",
+    designer_response: "todo",
+  };
+}
+
+function buildReviewBundlePath(role, batchId, itemId) {
+  if (role === "developer") {
+    return `workspace/reviews/${batchId}/${itemId}/developer-review.md`;
+  }
+
+  if (role === "qa") {
+    return `workspace/reviews/${batchId}/${itemId}/qa-review.md`;
+  }
+
+  return null;
+}
+
 function normalizeTaskEntry(entry) {
   return {
     task_id: entry && entry.task_id ? entry.task_id : `unknown-${Date.now().toString(36)}`,
@@ -186,6 +210,10 @@ function normalizeItem(item) {
     title: next.title || next.item_id || "Untitled",
     role_order: roleOrder,
     retry_limit: Number.isInteger(next.retry_limit) && next.retry_limit > 0 ? next.retry_limit : 3,
+    review_gate: {
+      ...defaultReviewGateState(),
+      ...(next.review_gate && typeof next.review_gate === "object" ? next.review_gate : {}),
+    },
     roles: roleOrder.map((roleName) => normalizeRoleState(existingRoles.get(roleName), roleName)),
   };
 }
@@ -405,6 +433,22 @@ function extractRoleMode(role, summary) {
     };
   }
 
+  if (role === "developer") {
+    const matched = /^(review|implement):\s+(.+)$/.exec(trimmed);
+    return {
+      mode: matched ? matched[1] : null,
+      summary: matched ? matched[2].trim() : trimmed,
+    };
+  }
+
+  if (role === "qa") {
+    const matched = /^(review|tc|verify):\s+(.+)$/.exec(trimmed);
+    return {
+      mode: matched ? matched[1] : null,
+      summary: matched ? matched[2].trim() : trimmed,
+    };
+  }
+
   return {
     mode: null,
     summary: trimmed,
@@ -422,6 +466,14 @@ function validateRoleMode(meta) {
 
   if (meta.role === "designer" && !meta.mode) {
     return "Designer description must start with `review:` or `apply:` after the role prefix.";
+  }
+
+  if (meta.role === "developer" && !meta.mode) {
+    return "Developer description must start with `review:` or `implement:` after the role prefix.";
+  }
+
+  if (meta.role === "qa" && !meta.mode) {
+    return "QA description must start with `review:`, `tc:` or `verify:` after the role prefix.";
   }
 
   return null;
@@ -628,6 +680,7 @@ function ensureItem(batch, itemId, summary) {
       title: summary || itemId,
       role_order: [...DEFAULT_ROLE_ORDER],
       retry_limit: 3,
+      review_gate: defaultReviewGateState(),
       roles: DEFAULT_ROLE_ORDER.map((roleName) => buildRoleState(roleName, true)),
     });
     itemIndex = batch.items.length - 1;
@@ -731,6 +784,37 @@ function reopenRoleState(roleState, reason = null) {
   roleState.missing_items = [];
   roleState.last_error = reason;
   roleState.last_updated_at = nowIso();
+}
+
+function ensureReviewGate(item) {
+  if (!item.review_gate || typeof item.review_gate !== "object") {
+    item.review_gate = defaultReviewGateState();
+  }
+  return item.review_gate;
+}
+
+function openReviewGate(item) {
+  const gate = ensureReviewGate(item);
+  if (gate.status === "idle") {
+    item.review_gate = {
+      ...defaultReviewGateState(),
+      status: "open",
+      opened_at: nowIso(),
+    };
+    return item.review_gate;
+  }
+  return gate;
+}
+
+function isReviewGateResolved(item) {
+  const gate = ensureReviewGate(item);
+  return gate.status === "resolved";
+}
+
+function setReviewGateStep(item, key, value) {
+  const gate = ensureReviewGate(item);
+  gate[key] = value;
+  return gate;
 }
 
 function findDispatchByAgentId(dispatchState, agentId) {
@@ -861,6 +945,23 @@ function collectPredecessorFailures(item, currentRole) {
         (entry.skip_ticket && entry.skip_ticket.status) !== "issued"
     )
     .map((entry) => `${entry.role} done/skip ticket missing`);
+}
+
+function collectModeAwarePredecessorFailures(item, currentRole, currentMode) {
+  if (currentRole === "qa" && currentMode === "review") {
+    return ["planner", "designer"]
+      .map((roleName) => item.roles.find((entry) => entry.role === roleName))
+      .filter(Boolean)
+      .filter((entry) => entry.required !== false)
+      .filter(
+        (entry) =>
+          (entry.done_ticket && entry.done_ticket.status) !== "issued" &&
+          (entry.skip_ticket && entry.skip_ticket.status) !== "issued"
+      )
+      .map((entry) => `${entry.role} done/skip ticket missing`);
+  }
+
+  return collectPredecessorFailures(item, currentRole);
 }
 
 function substituteCommand(template, context) {
@@ -1276,8 +1377,26 @@ async function handlePreToolUseAgent() {
 
   const context = getStateContext(state, meta);
   const retryLimit = context.item.retry_limit || 3;
-  const predecessorFailures = collectPredecessorFailures(context.item, meta.role);
+  const predecessorFailures = collectModeAwarePredecessorFailures(
+    context.item,
+    meta.role,
+    meta.mode
+  );
   const plannerReopen = meta.role === "planner" && meta.mode === "revise";
+  const reviewGate = ensureReviewGate(context.item);
+  const developerReview = meta.role === "developer" && meta.mode === "review";
+  const developerImplement = meta.role === "developer" && meta.mode === "implement";
+  const qaReview = meta.role === "qa" && meta.mode === "review";
+  const designerReviewSync =
+    meta.role === "designer" &&
+    meta.mode === "apply" &&
+    reviewGate.status === "awaiting_design_sync";
+  const designerRoleState = context.item.roles.find((entry) => entry.role === "designer");
+  const reviewGateRequired = Boolean(designerRoleState && hasIssuedTicket(designerRoleState));
+
+  if ((developerReview || qaReview) && reviewGate.status === "idle") {
+    openReviewGate(context.item);
+  }
 
   if (plannerReopen && hasDownstreamIssuedTicket(context.item, meta.role)) {
     saveState(state);
@@ -1299,11 +1418,62 @@ async function handlePreToolUseAgent() {
     return;
   }
 
+  if (
+    plannerReopen &&
+    reviewGate.status !== "idle" &&
+    (reviewGate.developer_review !== "done" || reviewGate.qa_review !== "done")
+  ) {
+    saveState(state);
+    if (state.gate_mode === "enforce") {
+      stderrBlock(
+        `Planner revise blocked for ${meta.batch_id}/${meta.item_id}: developer/qa review is not complete.`
+      );
+    }
+    return;
+  }
+
   if (plannerReopen && context.roleState.skip_ticket.status !== "issued") {
     reopenRoleState(
       context.roleState,
       `planner reopened by revise mode for ${meta.batch_id}/${meta.item_id}`
     );
+  }
+
+  if (designerReviewSync) {
+    if (hasDownstreamIssuedTicket(context.item, meta.role)) {
+      saveState(state);
+      if (state.gate_mode === "enforce") {
+        stderrBlock(
+          `Designer sync blocked for ${meta.batch_id}/${meta.item_id}: downstream role already has a done/skip ticket.`
+        );
+      }
+      return;
+    }
+
+    if (reviewGate.planner_response !== "done") {
+      saveState(state);
+      if (state.gate_mode === "enforce") {
+        stderrBlock(
+          `Designer sync blocked for ${meta.batch_id}/${meta.item_id}: planner response is not complete.`
+        );
+      }
+      return;
+    }
+
+    reopenRoleState(
+      context.roleState,
+      `designer reopened by review gate sync for ${meta.batch_id}/${meta.item_id}`
+    );
+  }
+
+  if (developerImplement && reviewGateRequired && !isReviewGateResolved(context.item)) {
+    saveState(state);
+    if (state.gate_mode === "enforce") {
+      stderrBlock(
+        `Developer implement blocked for ${meta.batch_id}/${meta.item_id}: planning review gate is not resolved.`
+      );
+    }
+    return;
   }
 
   const recoveredEntries = recoverOpenDispatches(state);
@@ -1331,6 +1501,7 @@ async function handlePreToolUseAgent() {
 
       if (
         !plannerReopen &&
+        !designerReviewSync &&
         (context.roleState.done_ticket.status === "issued" ||
           context.roleState.skip_ticket.status === "issued")
       ) {
@@ -1382,6 +1553,50 @@ async function handlePreToolUseAgent() {
 function finalizeDispatchEntry(state, dispatchEntry, payload) {
   const meta = buildMetaFromDispatchEntry(dispatchEntry);
   const context = getStateContext(state, meta);
+  const reviewGate = ensureReviewGate(context.item);
+
+  if (meta.role === "developer" && dispatchEntry.mode === "review") {
+    const validatedAt = nowIso();
+    const reviewBundlePath = buildReviewBundlePath("developer", meta.batch_id, meta.item_id);
+    const ok = checkMtimeAfter(reviewBundlePath, dispatchEntry.created_at);
+    reviewGate.status = reviewGate.status === "idle" ? "open" : reviewGate.status;
+    reviewGate.developer_review = ok ? "done" : "blocked";
+    context.roleState.status = "todo";
+    context.roleState.last_error = ok
+      ? null
+      : "developer review bundle missing or not updated after dispatch";
+    context.roleState.last_updated_at = validatedAt;
+    saveState(state);
+    return {
+      ok,
+      retryLimit: context.item.retry_limit || 3,
+      failures: ok ? [] : ["developer review bundle missing or stale"],
+      meta,
+      status: ok ? "completed" : "blocked",
+      validatedAt,
+    };
+  }
+
+  if (meta.role === "qa" && dispatchEntry.mode === "review") {
+    const validatedAt = nowIso();
+    const reviewBundlePath = buildReviewBundlePath("qa", meta.batch_id, meta.item_id);
+    const ok = checkMtimeAfter(reviewBundlePath, dispatchEntry.created_at);
+    reviewGate.status = reviewGate.status === "idle" ? "open" : reviewGate.status;
+    reviewGate.qa_review = ok ? "done" : "blocked";
+    context.roleState.status = "todo";
+    context.roleState.last_error = ok ? null : "qa review bundle missing or not updated after dispatch";
+    context.roleState.last_updated_at = validatedAt;
+    saveState(state);
+    return {
+      ok,
+      retryLimit: context.item.retry_limit || 3,
+      failures: ok ? [] : ["qa review bundle missing or stale"],
+      meta,
+      status: ok ? "completed" : "blocked",
+      validatedAt,
+    };
+  }
+
   if (meta.role === "designer" && dispatchEntry.mode === "review") {
     const validatedAt = nowIso();
     context.roleState.status = "in_progress";
@@ -1462,6 +1677,12 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
 
   if (failures.length > 0) {
     const validatedAt = nowIso();
+    if (meta.role === "planner" && reviewGate.status !== "idle") {
+      reviewGate.planner_response = "blocked";
+    }
+    if (meta.role === "designer" && reviewGate.status === "awaiting_design_sync") {
+      reviewGate.designer_response = "blocked";
+    }
     context.roleState.status = "blocked";
     context.roleState.missing_items = failures;
     context.roleState.last_error = summarizeFailures(failures);
@@ -1518,6 +1739,18 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
       reason: null,
     })
   );
+
+  if (meta.role === "planner" && reviewGate.status !== "idle") {
+    reviewGate.planner_response = "done";
+    reviewGate.status = "awaiting_design_sync";
+    reviewGate.resolved_at = null;
+  }
+
+  if (meta.role === "designer" && reviewGate.status === "awaiting_design_sync") {
+    reviewGate.designer_response = "done";
+    reviewGate.status = "resolved";
+    reviewGate.resolved_at = validatedAt;
+  }
 
   saveState(state);
   return {
@@ -1975,6 +2208,9 @@ function printUsage() {
       "validator.js parse-subject \"[Batch8][R17][tester] summary\"",
       "validator.js parse-subject \"[Batch8][R17][planner] plan: short summary\"",
       "validator.js parse-subject \"[Batch8][R17][designer] review: short summary\"",
+      "validator.js parse-subject \"[Batch8][R17][developer] review: short summary\"",
+      "validator.js parse-subject \"[Batch8][R17][developer] implement: short summary\"",
+      "validator.js parse-subject \"[Batch8][R17][qa] review: short summary\"",
       "validator.js inspect-event path/to/payload.json",
       "validator.js issue-skip Batch8 R17 designer \"No UI-visible change\"",
       "validator.js check file_exists path/to/file",

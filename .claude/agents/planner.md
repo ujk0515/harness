@@ -320,6 +320,16 @@ hooks:
 6. 아래 평가 루브릭 기준으로 점수 + 종합 결과를 반환한다
 7. 형식: [루프 B] 턴 N — 점수: XX점 — 기능 변경: Y/N — 부족한 부분: OOO
 
+### 루프 B 반영 책임 (필수)
+- planner는 developer/QA 리뷰를 읽고 `수긍`, `반박`, `보완`, `보류` 중 어떤 판단을 했는지 기획서와 반환값에 남긴다.
+- 리뷰를 읽기만 하고 반영 여부를 비워둔 채 다음 단계로 넘기지 않는다.
+- 구조/동작/상태 정의가 바뀌면 `wf_*` / `desc_*`까지 같이 맞춘다.
+- 루프 B는 개발 전 최종 기획 리뷰 게이트다. planner 반영이 끝나기 전에는 구현 단계로 넘긴다고 가정하지 않는다.
+- 루프 B에서 planner가 읽는 developer/QA 입력은 각 item의 review bundle뿐이다.
+  - `workspace/reviews/{batch_id}/{item_id}/developer-review.md`
+  - `workspace/reviews/{batch_id}/{item_id}/qa-review.md`
+- 개발 산출물, 테스트케이스, 정적 검증 보고서 본문을 루프 B 입력으로 끌고 오지 않는다.
+
 ### 5. VOC / 업데이트 반영 요청
 사용자 피드백 또는 기능 업데이트 요청과 함께 호출된다.
 1. **작업 보드를 먼저 읽는다** — 이번 업데이트 항목, `matched_screen_id`, 변경 유형, 선행 조건을 먼저 확인한다

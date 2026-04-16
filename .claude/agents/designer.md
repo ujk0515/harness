@@ -110,6 +110,16 @@ hooks:
   - 예: `planner update required: desc_auth_login 비밀번호 찾기 상태 설명 없음`
   - 예: `planner update required: 기존 로그인 화면 업데이트 근거가 기획서/desc에 없음`
 
+## 루프 B 반영 책임 (필수)
+- developer/QA 리뷰 이후 planner가 기획을 수정하면, 디자이너는 그 변경이 `design_*`에 영향을 주는지 다시 판단한다.
+- 영향이 있으면 `design_*`를 실제로 재동기화한다.
+- 영향이 없더라도 리뷰 내용을 읽고 왜 유지 가능한지 또는 왜 수정이 필요한지 반환값에 남긴다.
+- planner 반영 이후 designer 쪽 확인/반영이 끝나기 전에는 개발 구현 단계로 넘어간다고 가정하지 않는다.
+- 루프 B에서 designer가 읽는 developer/QA 입력은 각 item의 review bundle뿐이다.
+  - `workspace/reviews/{batch_id}/{item_id}/developer-review.md`
+  - `workspace/reviews/{batch_id}/{item_id}/qa-review.md`
+- 구현 코드, 테스트케이스 본문, 검증 보고서 전체를 루프 B 입력으로 대신 사용하지 않는다.
+
 ## 디자인 토큰 / 구현 참조
 - 세부 폰트/spacing/타이포/컴포넌트/코드 패턴은 `workflow/references/designer-reference.md`를 정본으로 따른다.
 - 본문 매뉴얼에서는 게이트, mode, handoff 기준만 유지한다.

@@ -195,6 +195,10 @@
 - designer는 `review:` 또는 `apply:` 모드로만 호출한다.
 - `review:`는 UX 리뷰 전용이다. `design_*`를 만들지 않고 `designer.done`을 발급하지 않는다.
 - `apply:`는 실제 `design_*` 생성/수정 전용이다. 이 모드만 `designer.done` 대상이다.
+- developer는 `review:` 또는 `implement:` 모드로만 호출한다.
+- `developer review:`는 개발 전 기획 리뷰, `developer implement:`는 실제 구현이다.
+- QA는 `review:` / `tc:` / `verify:` 모드로만 호출한다.
+- `qa review:`는 개발 전 기획 리뷰, `qa tc:`는 테스트케이스 작성, `qa verify:`는 정적 검증이다.
 - 위 mode prefix가 없으면 게이트에서 차단한다.
 
 #### request-state 초기화 시점 (필수)
@@ -429,8 +433,8 @@
 | Penpot 설명 Board | Penpot 프로젝트 내 `desc_[screen_id]` Board | 기획자 | 설명 정본 |
 | Penpot 디자인 | Penpot 프로젝트 내 `design_[screen_id]` Board + Token | 디자이너 | 시각 정본 |
 | UX 리뷰 | workspace/design/A-uiux-review.md | 디자이너 | |
-| 기술 검토 | workspace/reports/B-tech-review.md | 개발자 | |
-| QA 기획 검토 | workspace/reports/B-qa-review.md | QA | |
+| 개발 기획 리뷰 묶음 | workspace/reviews/{batch_id}/{item_id}/developer-review.md | 개발자 | 루프 B 전용 |
+| QA 기획 리뷰 묶음 | workspace/reviews/{batch_id}/{item_id}/qa-review.md | QA | 루프 B 전용 |
 | 테스트케이스 | workspace/testing/C-testcases.md | QA | |
 | QA 상태/요약 | workspace/reports/.qa-last-run.json | QA | 경량 반환 대체용 |
 | Claim 파일 | workspace/claims/{batch_id}/{item_id}/{role}.claim.json | 각 역할 | validator 입력 |
@@ -568,22 +572,20 @@
 2. Agent(secretary) 호출: "루프 A 완료 기록. 기획서, `wf_*`, `desc_*`, `design_*`, 점수/리뷰 결과를 기준으로 이번 루프 요약을 agent-log에 기록해"
 3. 루프 A 전체 완료
 
-### 루프 B: 전체 기획 리뷰 (개발자 + QA + 기획자)
-1. Agent(developer) 호출: "기획서: {경로}. `wf_*`, `desc_*`, `design_*`를 확인해. 기술 검토 + 실현 가능성 의견 내"
-2. Agent(qa) 호출: "기획서: {경로}. `wf_*`, `desc_*`, `design_*`를 확인해. 기획 검토 + 테스트 관점 의견 내"
-3. Agent(planner) 호출: "개발자 의견: {경로}, QA 의견: {경로}. 작업 보드: workspace/planning/request-workboard.md. 종합하여 타협점 정리. 기획서 최종 수정 + 필요시 `wf_*` + `desc_*` 수정. 변경 내용을 '기능 변경', '문구/구조 정리', '`wf_*`/`desc_*` 변경 여부'로 분류해서 반환해. 점수도 반환해"
-4. 기획자 변경 내용 확인:
-   - `wf_*` / `desc_*` 변경 있음 → Agent(designer) 호출: "변경된 기획서 + `wf_*` + `desc_*`를 기준으로 영향받는 `design_*`만 재동기화해. 변경 없는 `design_*`는 건드리지 마"
-   - 기능 변경 있음 → Agent(developer) 호출: "기획자 수정 내역: {변경분}. 기술적으로 문제 없는지 확인해"
-   - 문구/구조만 있고 Penpot 영향 없음 → 재검토 없이 기획자 점수로 판정
-5. 통과 기준 미만 → 1번 반복
+### 루프 B: 기획 리뷰 + 반영 루프 (개발자 + QA + 기획자 + 디자이너)
+이 루프는 **기획서 + `wf_*` + `desc_*` + `design_*` 1차 완료 직후 반드시 실행되는 review gate**다. 이 루프가 닫히기 전에는 developer 구현이 열리지 않는다.
+1. 각 `item_id`마다 Agent(developer) 호출: `"[Batch{N}][R{M}][developer] review: feasibility review {요청 항목 요약}"` + "기획서 + `wf_*` + `desc_*` + `design_*`를 읽고 개발 가능 여부, 구현 난이도, 기술 리스크, 변경 요청 사항을 정리해. 결과는 `workspace/reviews/{batch_id}/{item_id}/developer-review.md`에 남겨. 이 단계에서는 구현 산출물을 만들지 마"
+2. 각 `item_id`마다 Agent(qa) 호출: `"[Batch{N}][R{M}][qa] review: planning review {요청 항목 요약}"` + "기획서 + `wf_*` + `desc_*` + `design_*`를 읽고 사용자 시점의 누락, 헷갈리는 동선, 테스트 관점 리스크, UI/UX 불편 요소를 정리해. 결과는 `workspace/reviews/{batch_id}/{item_id}/qa-review.md`에 남겨. 이 단계에서는 테스트케이스/검증 산출물을 만들지 마"
+3. Agent(planner) 호출: `"[Batch{N}][R{M}][planner] revise: {요청 항목 요약}"` + "각 item의 `developer-review.md` + `qa-review.md`만 읽고, 수긍/반박/보완 계획을 반영하여 기획서 + 필요시 `wf_*` + `desc_*`를 수정해. 변경 분류와 반영 여부를 명시해"
+4. Agent(designer) 호출: `"[Batch{N}][R{M}][designer] apply: review sync {요청 항목 요약}"` + "각 item의 `developer-review.md` + `qa-review.md`와 planner 반영 결과만 읽고 `design_*`를 재동기화해. 변경이 없으면 그 사유를 남기고, 변경이 있으면 `design_*`를 실제로 다시 맞춰"
+5. 통과 기준 미만 → 1번부터 같은 `item_id`로 반복
 6. 통과 기준 이상:
-   - Agent(secretary) 호출: "루프 B 완료 기록. 개발자/QA 검토 결과, 기획자 점수, 변경 분류를 기준으로 이번 루프 요약을 agent-log에 기록해"
+   - Agent(secretary) 호출: "루프 B 완료 기록. 개발자/QA 리뷰, planner 반영, designer 재동기화 결과를 기준으로 이번 루프 요약을 agent-log에 기록해"
    - 루프 B 완료
 
 ### 루프 C: 개발 + 테스트케이스 작성 (동시 진행)
-1. Agent(developer) 호출: "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md. `wf_*`, `desc_*`, `design_*`를 참조하여 프론트엔드 개발해 (workspace/development/). 서버 스택이 있으면 workspace/server/에 서버도 개발해. 구현 완료 전 각 `요청 항목`이 코드와 화면 동작에 반영되었는지 gap check하고 `request_coverage`를 반환해"
-2. Agent(qa) 호출: "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md + 직전 QA 상태: workspace/reports/.qa-last-run.json. `wf_*`, `desc_*`, `design_*`를 확인해. 테스트케이스 작성해 (프론트 + 서버 API 둘 다). 상세는 파일에 저장하고 반환은 경량 요약만 해"
+1. 각 `item_id`마다 Agent(developer) 호출: `"[Batch{N}][R{M}][developer] implement: build {요청 항목 요약}"` + "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md. `wf_*`, `desc_*`, `design_*`를 참조하여 프론트엔드 개발해 (workspace/development/). 서버 스택이 있으면 workspace/server/에 서버도 개발해. 구현 완료 전 각 `요청 항목`이 코드와 화면 동작에 반영되었는지 gap check하고 `request_coverage`를 반환해"
+2. 각 `item_id`마다 Agent(qa) 호출: `"[Batch{N}][R{M}][qa] tc: write testcases {요청 항목 요약}"` + "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md + 직전 QA 상태: workspace/reports/.qa-last-run.json. `wf_*`, `desc_*`, `design_*`를 확인해. 테스트케이스 작성해 (프론트 + 서버 API 둘 다). 상세는 파일에 저장하고 반환은 경량 요약만 해"
 3. 하네스가 developer / QA 반환값과 작업 보드의 `developer_status`, `qa_status`를 함께 확인한다
    - QA 반환이 짧거나 일부 잘렸더라도 `workspace/reports/.qa-last-run.json`과 `workspace/testing/C-testcases.md`가 최신이면 파일 우선 규칙으로 완료 여부를 판단한다
    - 현재 요청 배치에 `developer`가 필수인데 `tester_status = skipped`로 기록돼 있으면 배치 오류다. 하네스는 이를 자동 수정하고 tester를 같은 배치의 필수 역할로 복구한 뒤 진행한다.
@@ -595,7 +597,7 @@
    - 루프 C 완료
 
 ### 루프 D: 개발 ↔ 검증
-1. Agent(qa) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로} + planner/designer/developer request_coverage + 직전 QA 상태: workspace/reports/.qa-last-run.json. 코드 정적 분석으로 검증해. 상세는 파일에 저장하고 반환은 경량 요약만 해"
+1. Agent(qa) 호출: `"[Batch{N}][R{M}][qa] verify: static verify {요청 항목 요약}"` + "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로} + planner/designer/developer request_coverage + 직전 QA 상태: workspace/reports/.qa-last-run.json. 코드 정적 분석으로 검증해. 상세는 파일에 저장하고 반환은 경량 요약만 해"
 2. Agent(tester) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로} + planner/designer/developer request_coverage + 직전 테스터 상태: workspace/testing/.tester-state.json + 직전 테스터 요약: workspace/reports/.tester-last-run.json. Playwright로 브라우저 실행 테스트해. 상세는 파일에 저장하고 반환은 경량 요약만 해"
    - 요청 배치에 `developer`가 필수였던 항목은 기본적으로 tester도 필수다. 시간 절약을 이유로 tester를 생략하지 않는다.
 3. QA(정적 분석) + 테스터(브라우저 실행) 점수 종합 (둘 중 낮은 점수 기준)
@@ -604,7 +606,7 @@
    - `화면 문제` → Agent(designer) 수정 후 필요 시 Agent(planner) 확인 → 루프 C-1번으로
    - `동작 오류` → Agent(developer) 수정 → 5번으로
 5. **재검증 (턴 2 이후):** 하네스가 이전 이슈 목록 + 개발자 수정 내역을 함께 전달한다
-   - Agent(qa) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분} + 직전 QA 상태: workspace/reports/.qa-last-run.json. 수정된 부분 확인 + 회귀 없는지 체크해. 상세는 파일에 저장하고 반환은 경량 요약만 해"
+   - Agent(qa) 호출: `"[Batch{N}][R{M}][qa] verify: static re-verify {요청 항목 요약}"` + "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분} + 직전 QA 상태: workspace/reports/.qa-last-run.json. 수정된 부분 확인 + 회귀 없는지 체크해. 상세는 파일에 저장하고 반환은 경량 요약만 해"
    - Agent(tester) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분} + 직전 테스터 상태: workspace/testing/.tester-state.json + 직전 테스터 요약: workspace/reports/.tester-last-run.json. 수정된 부분 Playwright로 재테스트 + 기존 PASS 항목 회귀 체크해. 상세는 파일에 저장하고 반환은 경량 요약만 해"
    - 3번으로
 6. 통과 기준 이상이어도 하네스가 QA / tester 반환값과 작업 보드의 `qa_status`, `tester_status`를 함께 확인한다

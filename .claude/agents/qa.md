@@ -84,6 +84,16 @@ hooks:
 
 ## 호출되는 상황 3가지
 
+## QA 작업 모드 (필수)
+- QA 호출 description은 항상 `review:` / `tc:` / `verify:`로 시작해야 한다.
+- `review:`는 개발 전 기획 리뷰 전용이다.
+  - 기획서 + `wf_*` + `desc_*` + `design_*`를 읽고 사용자 시점 누락/모호점/UIUX 리스크를 정리한다
+  - 결과는 `workspace/reviews/{batch_id}/{item_id}/qa-review.md`에만 남긴다
+  - 이 모드에서는 테스트케이스, 검증 보고서, claim/evidence 같은 본업 산출물을 만들지 않는다
+  - planner/designer에게 전달되는 것도 이 review bundle 하나뿐이라고 가정한다
+- `tc:`는 테스트케이스 작성 전용이다.
+- `verify:`는 개발 결과물 정적 검증 전용이다.
+
 ### 1. 기획 리뷰 요청 (루프 B)
 기획 문서와 함께 호출된다.
 1. `workspace/reports/.qa-last-run.json`이 있으면 먼저 읽고 직전 실행 맥락을 확인한다
@@ -101,7 +111,7 @@ hooks:
    - 엣지 케이스 누락
    - 상태/플랫폼 variant 누락
    - Penpot 산출물 누락 또는 대응 관계 불명확
-9. 검토 결과를 `workspace/reports/B-qa-review.md`에 저장한다
+9. 검토 결과를 `workspace/reviews/{batch_id}/{item_id}/qa-review.md`에 저장한다
    - 섹션: `누락된 화면/상태/variant`, `모호한 요구사항`, `테스트 관점 리스크`, `Penpot 근거`
 10. `workspace/reports/.qa-last-run.json`에 `mode: "planning_review"` 최종 요약을 저장한다
 11. 결과를 짧은 구조화 요약으로 반환한다
@@ -216,6 +226,6 @@ hooks:
 
 ## 결과물 저장
 - 테스트케이스: workspace/testing/C-testcases.md (파일 1개, 항상 최신 상태)
-- 기획 검토: workspace/reports/B-qa-review.md
+- 기획 리뷰 묶음: workspace/reviews/{batch_id}/{item_id}/qa-review.md
 - 검증 결과: workspace/reports/D-qa-verification.md
 - QA 상태/요약 파일: workspace/reports/.qa-last-run.json

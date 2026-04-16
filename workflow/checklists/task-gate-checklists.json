@@ -177,11 +177,6 @@
         "command": "node .claude/scripts/validator.js check dir_has_entries_after workspace/evidence/developer/{batch_id}/{item_id} {dispatch_created_at}"
       },
       {
-        "id": "developer_report_recent",
-        "label": "기술 검토 보고가 현재 시도 이후 갱신됨",
-        "command": "node .claude/scripts/validator.js check mtime_after workspace/reports/B-tech-review.md {dispatch_created_at}"
-      },
-      {
         "id": "developer_state_done",
         "label": "request-state 내 developer status = done",
         "command": "node .claude/scripts/validator.js check json_field_equals workspace/planning/request-state.json batches.{batch_index}.items.{item_index}.roles.{role_index}.status done"

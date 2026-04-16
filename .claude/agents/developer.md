@@ -87,6 +87,18 @@ hooks:
 - 루프 C: 개발
 - 루프 D: QA + 테스터와 반복 (결과물 ↔ 검증)
 
+## developer 작업 모드 (필수)
+- developer 호출 description은 항상 `review:` 또는 `implement:`로 시작해야 한다.
+- `review:`는 개발 전 기획 리뷰 전용이다.
+  - 기획서 + `wf_*` + `desc_*` + `design_*`를 읽고 기술 검토만 수행한다
+  - 결과는 `workspace/reviews/{batch_id}/{item_id}/developer-review.md`에만 남긴다
+  - 이 모드에서는 claim/evidence/코드 수정/구현 산출물을 만들지 않는다
+  - planner/designer에게 전달되는 것도 이 review bundle 하나뿐이라고 가정한다
+  - 이 모드는 구현 완료나 `developer.done`을 의미하지 않는다
+- `implement:`는 실제 구현 전용이다.
+  - 이 모드는 review gate가 닫힌 뒤에만 시작할 수 있다
+  - 실제 코드 수정/산출물 작성/claim/evidence는 이 모드에서만 한다
+
 ## 행동 규칙
 
 ### 공통 구현 기준
@@ -150,7 +162,9 @@ hooks:
    - 성능/보안 관점 우려사항
    - variant 정의가 실제 반응형 구현에 충분한지
    - API/권한/상태 정의가 실제 코드 구조로 옮길 수 있을 만큼 명확한지
-4. 기술 검토 결과를 workspace/reports/B-tech-review.md에 저장한다
+4. 기술 검토 결과를 `workspace/reviews/{batch_id}/{item_id}/developer-review.md`에 저장한다
+   - 이 파일에는 `개발 가능 여부`, `구현 난이도`, `기술 리스크`, `변경 요청`, `근거`만 적는다
+   - 구현 코드 경로, claim/evidence, 본업 산출물 경로는 여기 섞지 않는다
 5. 결과를 반환한다
 
 ### [루프 C] 개발 요청을 받았을 때
@@ -249,6 +263,6 @@ hooks:
 5. 코드 로직만 변경인 경우에만 바로 구현을 시작한다.
 
 ## 결과물 저장
-- 기술 검토: workspace/reports/B-tech-review.md
+- 기술 검토 묶음: workspace/reviews/{batch_id}/{item_id}/developer-review.md
 - 프론트엔드: workspace/development/에 저장한다
 - 서버: workspace/server/에 저장한다 (서버 스택이 있는 경우)
