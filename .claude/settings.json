@@ -3,32 +3,13 @@
     "bkit@bkit-marketplace": false
   },
   "hooks": {
-    "TaskCreated": [
+    "PreToolUse": [
       {
+        "matcher": "Agent",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/scripts/validator.js\" task-created"
-          }
-        ]
-      }
-    ],
-    "TaskCompleted": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/scripts/validator.js\" task-completed"
-          }
-        ]
-      }
-    ],
-    "TeammateIdle": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/scripts/validator.js\" teammate-idle"
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/scripts/validator.js\" pretool-agent"
           }
         ]
       }
@@ -38,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/scripts/validator.js\" hook-log"
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/scripts/validator.js\" subagent-start"
           }
         ]
       }
@@ -48,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/scripts/validator.js\" hook-log"
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/scripts/validator.js\" subagent-stop"
           }
         ]
       }

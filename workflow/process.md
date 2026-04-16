@@ -225,11 +225,11 @@
 - `request-workboard.md`의 `done`은 참고값일 뿐이다. `done ticket`이 없으면 다음 단계 입장권으로 인정하지 않는다.
 
 #### 작업명 규칙 (필수)
-- 하네스가 생성하는 task subject는 **반드시** 아래 형식을 따른다.
+- 하네스가 생성하는 Agent `description`은 **반드시** 아래 형식을 따른다.
   - `[Batch{N}][R{M}][role] subject`
   - 예: `[Batch8][R17][tester] floating-button verification`
-- `TaskCreated` 훅은 이 형식을 어긴 task를 차단한다.
-- validator는 `task_subject`에서 `batch_id`, `item_id`, `role`을 파싱하여 상태 JSON과 티켓 경로를 찾는다.
+- `PreToolUse(Agent)` 훅은 이 형식을 어긴 Agent 호출을 차단한다.
+- validator는 Agent `description`에서 `batch_id`, `item_id`, `role`을 파싱하여 상태 JSON과 티켓 경로를 찾는다.
 
 #### claim / evidence / ticket 규칙
 - 각 역할은 작업 종료 직전 아래 산출물을 남긴다.
@@ -243,16 +243,18 @@
 
 #### Hook 기반 하드 게이트
 - 하네스는 Claude Code hook으로 다음 3단 게이트를 사용한다.
-  - `TaskCreated`: subject 규칙 + predecessor ticket 검사
-  - `TaskCompleted`: 체크리스트 검사 후 `done ticket` 발급 또는 완료 차단
-  - `TeammateIdle`: ticket 없는 상태로 역할이 쉬는 것을 차단
-- 보조 관측용으로 `SubagentStart`, `SubagentStop`도 로그를 남긴다.
+  - `PreToolUse(Agent)`: description 규칙 검사 + predecessor ticket 검사 + in-flight dispatch 검사
+  - `SubagentStart`: dispatch에 `agent_id`를 결합하는 매핑 다리
+  - `SubagentStop`: 체크리스트 검사 후 `done ticket` 발급 또는 완료 차단
+- `TaskCreated`, `TaskCompleted`, `TeammateIdle`는 현재 Agent 호출 패턴의 주 게이트로 쓰지 않는다.
+- dispatch sidechannel은 `workspace/planning/.dispatch.json`이고, lock은 `workspace/planning/.dispatch.lock`으로 관리한다.
+- 동시에 둘 이상의 Agent dispatch가 열리면 안 된다. validator는 open dispatch가 남아 있으면 다음 Agent 호출을 차단한다.
 - 이 게이트는 `workflow/checklists/task-gate-checklists.json`과 `request-state.json`을 기준으로 동작한다.
 
 #### 루프백 / 재시도 규칙
 - 체크리스트 항목 중 1개라도 실패하면 validator는 `done ticket`을 발급하지 않는다.
-- `TaskCompleted`가 차단되면 같은 역할은 **완료로 닫히지 않으며**, 누락 항목을 받은 상태로 다시 루프를 돈다.
-- 다음 역할은 predecessor 역할의 `done ticket` 또는 `skip ticket`이 없으면 `TaskCreated` 단계에서 생성 자체가 차단된다.
+- `SubagentStop`가 차단되면 같은 역할은 **완료로 닫히지 않으며**, 누락 항목을 받은 상태로 다시 루프를 돈다.
+- 다음 역할은 predecessor 역할의 `done ticket` 또는 `skip ticket`이 없으면 `PreToolUse(Agent)` 단계에서 생성 자체가 차단된다.
 - 기본 재시도 상한은 항목별 `retry_limit = 3`이다.
 - 상한을 넘겨도 ticket이 발급되지 않으면 하네스는 해당 항목을 `blocked`로 유지하고 사용자에게 에스컬레이션한다.
 

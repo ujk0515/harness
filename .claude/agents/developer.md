@@ -71,16 +71,12 @@ hooks:
   - 수정한 코드 경로 목록
   - 실행/검증에 사용한 명령 요약
 - developer는 `done ticket`을 직접 만들지 않는다. validator가 체크리스트를 검사해 `developer.done.json`을 발급한다.
+- claim과 evidence는 **이번 시도에서 새로 갱신된 파일**이어야 한다. 이전 시도의 남은 파일은 통과로 인정되지 않는다.
 - `developer_status = done`은 claim/evidence를 남기고 자가 점검을 통과한 경우에만 사용한다.
 
 ## 자가 점검 관문 (필수)
-- developer는 종료 직전에 `workflow/checklists/task-gate-checklists.md`의 developer 체크를 다시 확인한다.
-- 아래 중 1개라도 실패하면 `developer_status = blocked`, `completion_state = partial`로 두고 종료한다.
-  - developer claim 존재
-  - `workspace/development/src` 산출물 존재
-  - 기술 검토/구현 보고 존재
-  - claim 안의 `covered_items` 존재
-  - `request-state.json`의 developer status 갱신
+- developer의 상세 체크 정본은 `workflow/checklists/task-gate-checklists.json`과 `workflow/checklists/task-gate-checklists.md`다.
+- 종료 직전 해당 developer 체크를 다시 확인하고, 1개라도 실패하면 `developer_status = blocked`, `completion_state = partial`로 두고 종료한다.
 - 체크를 통과하기 전에는 QA/tester 입장권이 열리지 않는다고 가정하고 작업한다.
 
 ## 참여하는 루프

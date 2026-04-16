@@ -1,26 +1,26 @@
 {
-  "schema_version": "1.0.0-draft",
+  "schema_version": "1.1.0",
   "roles": {
     "planner": [
       {
-        "id": "planning_doc_exists",
-        "label": "기획서 파일 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/planning/A-planning-doc.md"
+        "id": "planner_claim_recent",
+        "label": "planner claim 파일이 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/claims/{batch_id}/{item_id}/planner.claim.json {dispatch_created_at}"
       },
       {
-        "id": "planner_claim_exists",
-        "label": "planner claim 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/planner.claim.json"
+        "id": "planner_claim_covers_item",
+        "label": "planner claim의 covered_items에 현재 item_id가 포함됨",
+        "command": "node .claude/scripts/validator.js check json_array_contains workspace/claims/{batch_id}/{item_id}/planner.claim.json covered_items {item_id}"
       },
       {
-        "id": "wf_evidence_exists",
-        "label": "와이어프레임 evidence 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json"
+        "id": "planner_wf_export_recent",
+        "label": "planner wf-export evidence가 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json {dispatch_created_at}"
       },
       {
-        "id": "desc_evidence_exists",
-        "label": "설명 Board evidence 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json"
+        "id": "planner_desc_export_recent",
+        "label": "planner desc-export evidence가 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json {dispatch_created_at}"
       },
       {
         "id": "planner_state_done",
@@ -30,24 +30,24 @@
     ],
     "designer": [
       {
-        "id": "designer_claim_exists",
-        "label": "designer claim 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/designer.claim.json"
-      },
-      {
-        "id": "design_evidence_exists",
-        "label": "design export evidence 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/evidence/designer/{batch_id}/{item_id}/design-export.json"
-      },
-      {
-        "id": "design_board_manifest_exists",
-        "label": "대상 design board manifest 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/evidence/designer/{batch_id}/{item_id}/boards.json"
+        "id": "designer_claim_recent",
+        "label": "designer claim 파일이 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/claims/{batch_id}/{item_id}/designer.claim.json {dispatch_created_at}"
       },
       {
         "id": "designer_targets_truthy",
-        "label": "claim 안에 developer_targets 존재",
+        "label": "designer claim 안의 developer_targets 존재",
         "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/designer.claim.json developer_targets"
+      },
+      {
+        "id": "designer_design_export_recent",
+        "label": "designer design-export evidence가 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/designer/{batch_id}/{item_id}/design-export.json {dispatch_created_at}"
+      },
+      {
+        "id": "designer_boards_recent",
+        "label": "designer boards manifest가 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/designer/{batch_id}/{item_id}/boards.json {dispatch_created_at}"
       },
       {
         "id": "designer_state_done",
@@ -57,24 +57,24 @@
     ],
     "developer": [
       {
-        "id": "developer_claim_exists",
-        "label": "developer claim 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/developer.claim.json"
+        "id": "developer_claim_recent",
+        "label": "developer claim 파일이 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/claims/{batch_id}/{item_id}/developer.claim.json {dispatch_created_at}"
       },
       {
-        "id": "development_dir_has_entries",
-        "label": "프론트 산출물 디렉터리 비어있지 않음",
-        "command": "node .claude/scripts/validator.js check dir_has_entries workspace/development/src"
+        "id": "developer_claim_covers_item",
+        "label": "developer claim의 covered_items에 현재 item_id가 포함됨",
+        "command": "node .claude/scripts/validator.js check json_array_contains workspace/claims/{batch_id}/{item_id}/developer.claim.json covered_items {item_id}"
       },
       {
-        "id": "developer_report_exists",
-        "label": "기술 검토 또는 구현 보고 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/reports/B-tech-review.md"
+        "id": "developer_evidence_recent",
+        "label": "developer evidence 디렉터리에 현재 시도 이후 생성/수정 산출물이 있음",
+        "command": "node .claude/scripts/validator.js check dir_has_entries_after workspace/evidence/developer/{batch_id}/{item_id} {dispatch_created_at}"
       },
       {
-        "id": "developer_coverage_truthy",
-        "label": "claim 안에 covered_items 존재",
-        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/developer.claim.json covered_items"
+        "id": "developer_report_recent",
+        "label": "기술 검토 보고가 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/reports/B-tech-review.md {dispatch_created_at}"
       },
       {
         "id": "developer_state_done",
@@ -84,24 +84,24 @@
     ],
     "qa": [
       {
-        "id": "qa_claim_exists",
-        "label": "qa claim 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/qa.claim.json"
+        "id": "qa_claim_recent",
+        "label": "qa claim 파일이 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/claims/{batch_id}/{item_id}/qa.claim.json {dispatch_created_at}"
       },
       {
-        "id": "testcase_exists",
-        "label": "테스트케이스 파일 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/testing/C-testcases.md"
+        "id": "qa_evidence_recent",
+        "label": "qa evidence 디렉터리에 현재 시도 이후 생성/수정 산출물이 있음",
+        "command": "node .claude/scripts/validator.js check dir_has_entries_after workspace/evidence/qa/{batch_id}/{item_id} {dispatch_created_at}"
       },
       {
-        "id": "qa_summary_exists",
-        "label": "QA 상태 요약 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/reports/.qa-last-run.json"
+        "id": "qa_summary_recent",
+        "label": "qa 상태 요약 파일이 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/reports/.qa-last-run.json {dispatch_created_at}"
       },
       {
-        "id": "qa_report_exists",
-        "label": "QA 검증 보고 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/reports/D-qa-verification.md"
+        "id": "qa_report_recent",
+        "label": "qa 검증 보고가 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/reports/D-qa-verification.md {dispatch_created_at}"
       },
       {
         "id": "qa_state_done",
@@ -111,24 +111,24 @@
     ],
     "tester": [
       {
-        "id": "tester_claim_exists",
-        "label": "tester claim 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/tester.claim.json"
+        "id": "tester_claim_recent",
+        "label": "tester claim 파일이 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/claims/{batch_id}/{item_id}/tester.claim.json {dispatch_created_at}"
       },
       {
-        "id": "playwright_spec_exists",
-        "label": "Playwright spec 존재",
-        "command": "node .claude/scripts/validator.js check dir_has_entries workspace/testing/playwright"
+        "id": "tester_evidence_recent",
+        "label": "tester evidence 디렉터리에 현재 시도 이후 생성/수정 산출물이 있음",
+        "command": "node .claude/scripts/validator.js check dir_has_entries_after workspace/evidence/tester/{batch_id}/{item_id} {dispatch_created_at}"
       },
       {
-        "id": "playwright_result_exists",
-        "label": "Playwright JSON 결과 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/reports/playwright-results.json"
+        "id": "tester_playwright_result_recent",
+        "label": "Playwright 결과 JSON이 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/reports/playwright-results.json {dispatch_created_at}"
       },
       {
-        "id": "tester_report_exists",
-        "label": "tester 보고 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/reports/D-tester-verification.md"
+        "id": "tester_report_recent",
+        "label": "tester 검증 보고가 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/reports/D-tester-verification.md {dispatch_created_at}"
       },
       {
         "id": "tester_state_done",
@@ -138,24 +138,24 @@
     ],
     "secretary": [
       {
-        "id": "final_report_exists",
-        "label": "최종 보고서 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/reports/final-report.md"
+        "id": "secretary_claim_recent",
+        "label": "secretary claim 파일이 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/claims/{batch_id}/{item_id}/secretary.claim.json {dispatch_created_at}"
       },
       {
-        "id": "agent_log_exists",
-        "label": "agent log 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/reports/agent-log.txt"
+        "id": "secretary_evidence_recent",
+        "label": "secretary evidence 디렉터리에 현재 시도 이후 생성/수정 산출물이 있음",
+        "command": "node .claude/scripts/validator.js check dir_has_entries_after workspace/evidence/secretary/{batch_id}/{item_id} {dispatch_created_at}"
+      },
+      {
+        "id": "final_report_recent",
+        "label": "최종 보고서가 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/reports/final-report.md {dispatch_created_at}"
       },
       {
         "id": "final_report_has_summary",
         "label": "최종 보고서에 요약 섹션 존재",
         "command": "node .claude/scripts/validator.js check file_contains workspace/reports/final-report.md 요약"
-      },
-      {
-        "id": "secretary_claim_exists",
-        "label": "secretary claim 존재",
-        "command": "node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/secretary.claim.json"
       },
       {
         "id": "secretary_state_done",

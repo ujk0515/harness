@@ -66,16 +66,12 @@ hooks:
   - 수정/생성한 `wf_*` / `desc_*` 목록
   - `export_shape` 확인 결과 요약
 - planner는 `done ticket`을 직접 만들지 않는다. validator가 체크리스트를 검사해 `planner.done.json`을 발급한다.
+- claim과 evidence는 **이번 시도에서 새로 갱신된 파일**이어야 한다. 이전 시도의 남은 파일은 통과로 인정되지 않는다.
 - `planner_status = done`은 claim/evidence를 남기고 자가 점검을 통과한 경우에만 사용한다.
 
 ## 자가 점검 관문 (필수)
-- planner는 종료 직전에 `workflow/checklists/task-gate-checklists.md`의 planner 체크를 다시 확인한다.
-- 아래 중 1개라도 실패하면 `planner_status = blocked`, `completion_state = partial`로 두고 종료한다.
-  - 기획서 파일 존재
-  - planner claim 존재
-  - `wf_*` evidence 존재
-  - `desc_*` evidence 존재
-  - `request-state.json`의 planner status 갱신
+- planner의 상세 체크 정본은 `workflow/checklists/task-gate-checklists.json`과 `workflow/checklists/task-gate-checklists.md`다.
+- 종료 직전 해당 planner 체크를 다시 확인하고, 1개라도 실패하면 `planner_status = blocked`, `completion_state = partial`로 두고 종료한다.
 - 체크를 통과하기 전에는 다음 역할 입장권이 열리지 않는다고 가정하고 작업한다.
 
 ## 구조화 반환 일관성 계약 (필수)

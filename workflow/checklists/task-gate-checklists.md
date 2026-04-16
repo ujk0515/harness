@@ -1,85 +1,83 @@
 # Task Gate Checklists
 
-이 문서는 `request-state.json`의 역할별 체크리스트를 어떤 **기계 검증 명령**으로 판정할지 정리한 초안이다.
-실제 validator는 [task-gate-checklists.json](/Users/yoojaekwon/Desktop/develop/harness/workflow/checklists/task-gate-checklists.json:1)을 읽어 동작한다.
-모든 체크는 `node .claude/scripts/validator.js check ...` 형태로 실행 가능해야 한다.
+이 문서는 validator가 역할별 `done ticket`을 발급할 때 어떤 **기계 검증 항목**을 통과해야 하는지 정리한다.
+정본은 [task-gate-checklists.json](/Users/yoojaekwon/Desktop/develop/TripLog/workflow/checklists/task-gate-checklists.json:1)이고, 이 문서는 사람이 읽는 설명본이다.
+
+## 현재 게이트 방식
+
+- 입구 차단: `PreToolUse(Agent)`
+- 매핑 다리: `SubagentStart`
+- 출구 차단: `SubagentStop`
+- `TaskCreated` / `TaskCompleted` / `TeammateIdle`는 현재 Agent 호출 패턴에서 주 게이트로 쓰지 않는다.
+- 한 번에 하나의 Agent만 in-flight 상태여야 하며, dispatch lock으로 강제한다.
 
 ## 작업명 규칙
 
-- 모든 task subject는 아래 형식을 따른다.
+- 모든 Agent `description`은 아래 형식을 따른다.
 - 형식: `[Batch{N}][R{M}][role] subject`
 - 예: `[Batch8][R17][tester] floating-button verification`
-- 이 규칙을 어기면 `TaskCreated` 단계에서 생성 자체가 차단된다.
-- 파싱 확인 명령:
+- 이 형식을 어기면 `PreToolUse(Agent)`에서 입구 차단된다.
 
-```bash
-node .claude/scripts/validator.js parse-subject "[Batch8][R17][tester] floating-button verification"
-```
+## 검증 원칙
 
-## Planner
+- `done ticket`은 에이전트가 직접 만들지 않는다. validator가 발급한다.
+- 공통 기준은 3가지다.
+- claim 파일은 현재 시도(`dispatch_created_at`) 이후 갱신되어야 한다.
+- evidence는 `workspace/evidence/{role}/{batch_id}/{item_id}/` 아래 현재 시도 이후 생성/수정 흔적이 있어야 한다.
+- shared report는 파일 존재만이 아니라 현재 시도 이후 `mtime` 갱신으로 본다.
 
-| check_id | 의미 | 검증 명령 |
-|---|---|---|
-| planning_doc_exists | 기획서 파일 존재 | `node .claude/scripts/validator.js check file_exists workspace/planning/A-planning-doc.md` |
-| planner_claim_exists | planner claim 존재 | `node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/planner.claim.json` |
-| wf_evidence_exists | 와이어프레임 evidence 존재 | `node .claude/scripts/validator.js check file_exists workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json` |
-| desc_evidence_exists | 설명 Board evidence 존재 | `node .claude/scripts/validator.js check file_exists workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json` |
-| planner_state_done | request-state 내 planner status = done | `node .claude/scripts/validator.js check json_field_equals workspace/planning/request-state.json batches.0.items.0.roles.0.status done` |
+## 역할별 핵심 체크
 
-## Designer
+### Planner
 
-| check_id | 의미 | 검증 명령 |
-|---|---|---|
-| designer_claim_exists | designer claim 존재 | `node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/designer.claim.json` |
-| design_evidence_exists | design export evidence 존재 | `node .claude/scripts/validator.js check file_exists workspace/evidence/designer/{batch_id}/{item_id}/design-export.json` |
-| design_board_manifest_exists | 대상 design board manifest 존재 | `node .claude/scripts/validator.js check file_exists workspace/evidence/designer/{batch_id}/{item_id}/boards.json` |
-| designer_targets_truthy | claim 안에 developer_targets 존재 | `node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/designer.claim.json developer_targets` |
-| designer_state_done | request-state 내 designer status = done | `node .claude/scripts/validator.js check json_field_equals workspace/planning/request-state.json batches.0.items.0.roles.1.status done` |
+- `workspace/claims/{batch_id}/{item_id}/planner.claim.json`가 현재 시도 이후 갱신
+- claim의 `covered_items`에 현재 `item_id` 포함
+- `workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json`가 현재 시도 이후 갱신
+- `workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json`가 현재 시도 이후 갱신
+- `request-state.json`의 planner status가 `done`
 
-## Developer
+### Designer
 
-| check_id | 의미 | 검증 명령 |
-|---|---|---|
-| developer_claim_exists | developer claim 존재 | `node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/developer.claim.json` |
-| development_dir_has_entries | 프론트 산출물 디렉터리 비어있지 않음 | `node .claude/scripts/validator.js check dir_has_entries workspace/development/src` |
-| developer_report_exists | 기술 검토 또는 구현 보고 존재 | `node .claude/scripts/validator.js check file_exists workspace/reports/B-tech-review.md` |
-| developer_coverage_truthy | claim 안에 covered_items 존재 | `node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/developer.claim.json covered_items` |
-| developer_state_done | request-state 내 developer status = done | `node .claude/scripts/validator.js check json_field_equals workspace/planning/request-state.json batches.0.items.0.roles.2.status done` |
+- `workspace/claims/{batch_id}/{item_id}/designer.claim.json`가 현재 시도 이후 갱신
+- claim 안의 `developer_targets` 존재
+- `workspace/evidence/designer/{batch_id}/{item_id}/design-export.json`가 현재 시도 이후 갱신
+- `workspace/evidence/designer/{batch_id}/{item_id}/boards.json`가 현재 시도 이후 갱신
+- `request-state.json`의 designer status가 `done`
 
-## QA
+### Developer
 
-| check_id | 의미 | 검증 명령 |
-|---|---|---|
-| qa_claim_exists | qa claim 존재 | `node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/qa.claim.json` |
-| testcase_exists | 테스트케이스 파일 존재 | `node .claude/scripts/validator.js check file_exists workspace/testing/C-testcases.md` |
-| qa_summary_exists | QA 상태 요약 존재 | `node .claude/scripts/validator.js check file_exists workspace/reports/.qa-last-run.json` |
-| qa_report_exists | QA 검증 보고 존재 | `node .claude/scripts/validator.js check file_exists workspace/reports/D-qa-verification.md` |
-| qa_state_done | request-state 내 qa status = done | `node .claude/scripts/validator.js check json_field_equals workspace/planning/request-state.json batches.0.items.0.roles.3.status done` |
+- `workspace/claims/{batch_id}/{item_id}/developer.claim.json`가 현재 시도 이후 갱신
+- claim의 `covered_items`에 현재 `item_id` 포함
+- `workspace/evidence/developer/{batch_id}/{item_id}/`에 현재 시도 이후 evidence 존재
+- `workspace/reports/B-tech-review.md`가 현재 시도 이후 갱신
+- `request-state.json`의 developer status가 `done`
 
-## Tester
+### QA
 
-| check_id | 의미 | 검증 명령 |
-|---|---|---|
-| tester_claim_exists | tester claim 존재 | `node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/tester.claim.json` |
-| playwright_spec_exists | Playwright spec 존재 | `node .claude/scripts/validator.js check dir_has_entries workspace/testing/playwright` |
-| playwright_result_exists | Playwright JSON 결과 존재 | `node .claude/scripts/validator.js check file_exists workspace/reports/playwright-results.json` |
-| tester_report_exists | tester 보고 존재 | `node .claude/scripts/validator.js check file_exists workspace/reports/D-tester-verification.md` |
-| tester_state_done | request-state 내 tester status = done | `node .claude/scripts/validator.js check json_field_equals workspace/planning/request-state.json batches.0.items.0.roles.4.status done` |
+- `workspace/claims/{batch_id}/{item_id}/qa.claim.json`가 현재 시도 이후 갱신
+- `workspace/evidence/qa/{batch_id}/{item_id}/`에 현재 시도 이후 evidence 존재
+- `workspace/reports/.qa-last-run.json`이 현재 시도 이후 갱신
+- `workspace/reports/D-qa-verification.md`가 현재 시도 이후 갱신
+- `request-state.json`의 qa status가 `done`
 
-## Secretary
+### Tester
 
-| check_id | 의미 | 검증 명령 |
-|---|---|---|
-| final_report_exists | 최종 보고서 존재 | `node .claude/scripts/validator.js check file_exists workspace/reports/final-report.md` |
-| agent_log_exists | agent log 존재 | `node .claude/scripts/validator.js check file_exists workspace/reports/agent-log.txt` |
-| final_report_has_summary | 최종 보고서에 요약 섹션 존재 | `node .claude/scripts/validator.js check file_contains workspace/reports/final-report.md \"요약\"` |
-| secretary_claim_exists | secretary claim 존재 | `node .claude/scripts/validator.js check file_exists workspace/claims/{batch_id}/{item_id}/secretary.claim.json` |
-| secretary_state_done | request-state 내 secretary status = done | `node .claude/scripts/validator.js check json_field_equals workspace/planning/request-state.json batches.0.items.0.roles.5.status done` |
+- `workspace/claims/{batch_id}/{item_id}/tester.claim.json`가 현재 시도 이후 갱신
+- `workspace/evidence/tester/{batch_id}/{item_id}/`에 현재 시도 이후 evidence 존재
+- `workspace/reports/playwright-results.json`이 현재 시도 이후 갱신
+- `workspace/reports/D-tester-verification.md`가 현재 시도 이후 갱신
+- `request-state.json`의 tester status가 `done`
+
+### Secretary
+
+- `workspace/claims/{batch_id}/{item_id}/secretary.claim.json`가 현재 시도 이후 갱신
+- `workspace/evidence/secretary/{batch_id}/{item_id}/`에 현재 시도 이후 evidence 존재
+- `workspace/reports/final-report.md`가 현재 시도 이후 갱신
+- `workspace/reports/final-report.md`에 `요약` 섹션 존재
+- `request-state.json`의 secretary status가 `done`
 
 ## 메모
 
-- 위 `batches.0.items.0.roles.N` 경로는 **예시**다. 실제 validator 연결 전에는 `batch_id`, `item_id`, `role`로 동적으로 찾아가는 로직이 필요하다.
-- claim / evidence / ticket 디렉터리는 아직 초안 경로다.
-- 이 문서의 목적은 “기계 검증 가능한 체크만 남긴다”는 기준을 고정하는 데 있다.
-- `done ticket`은 에이전트가 직접 만들지 않는다. validator가 체크리스트 통과 후 `workspace/tickets/{batch_id}/{item_id}/{role}.done.json`을 발급한다.
-- 역할이 정말 불필요하면 `validator.js issue-skip BatchN RN role "reason"`으로 `skip ticket`을 발급해야 다음 단계가 열린다.
+- `skipped`도 ticket이 있어야 유효하다. `skip ticket` 없는 `skipped`는 무효다.
+- validator는 `workflow/checklists/task-gate-checklists.json`을 읽어 실행한다.
+- 체크 1개라도 실패하면 `done ticket`은 발급되지 않고, 같은 역할이 다시 루프를 돈다.

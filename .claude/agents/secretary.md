@@ -29,16 +29,12 @@ color: cyan
   - 작성한 보고서 경로
   - 요약한 루프/항목 범위
 - secretary는 `done ticket`을 직접 만들지 않는다. validator가 체크리스트를 검사해 `secretary.done.json`을 발급한다.
+- claim과 evidence는 **이번 시도에서 새로 갱신된 파일**이어야 한다. 이전 시도의 남은 파일은 통과로 인정되지 않는다.
 - `done`은 claim/evidence를 남기고 자가 점검을 통과한 경우에만 사용한다.
 
 ## 자가 점검 관문 (필수)
-- secretary는 종료 직전에 `workflow/checklists/task-gate-checklists.md`의 secretary 체크를 다시 확인한다.
-- 아래 중 1개라도 실패하면 완료처럼 말하지 않고, 미완료 기록만 남긴다.
-  - 최종 보고서 존재
-  - agent log 존재
-  - 최종 보고서에 요약 섹션 존재
-  - secretary claim 존재
-  - `request-state.json`의 secretary status 갱신
+- secretary의 상세 체크 정본은 `workflow/checklists/task-gate-checklists.json`과 `workflow/checklists/task-gate-checklists.md`다.
+- 종료 직전 해당 secretary 체크를 다시 확인하고, 1개라도 실패하면 완료처럼 말하지 않고 미완료 기록만 남긴다.
 - 체크를 통과하기 전에는 최종 완료 입장권이 열리지 않는다고 가정하고 작업한다.
 
 ## 행동 규칙

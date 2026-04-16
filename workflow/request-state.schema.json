@@ -13,11 +13,11 @@
     "tasks",
     "batches"
   ],
-  "properties": {
-    "schema_version": {
-      "type": "string",
-      "const": "1.1.0-draft"
-    },
+    "properties": {
+      "schema_version": {
+        "type": "string",
+        "const": "1.2.0-draft"
+      },
     "updated_at": {
       "type": "string",
       "format": "date-time"
@@ -37,7 +37,8 @@
       "required": [
         "claims",
         "evidence",
-        "tickets"
+        "tickets",
+        "dispatch"
       ],
       "properties": {
         "claims": {
@@ -47,6 +48,9 @@
           "type": "string"
         },
         "tickets": {
+          "type": "string"
+        },
+        "dispatch": {
           "type": "string"
         }
       }

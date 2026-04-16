@@ -70,16 +70,12 @@ hooks:
   - `request_coverage`, `covered_items`, `missing_items`
   - 수정/생성한 `design_*` Board 목록
 - designer는 `done ticket`을 직접 만들지 않는다. validator가 체크리스트를 검사해 `designer.done.json`을 발급한다.
+- claim과 evidence는 **이번 시도에서 새로 갱신된 파일**이어야 한다. 이전 시도의 남은 파일은 통과로 인정되지 않는다.
 - `designer_status = done`은 claim/evidence를 남기고 자가 점검을 통과한 경우에만 사용한다.
 
 ## 자가 점검 관문 (필수)
-- designer는 종료 직전에 `workflow/checklists/task-gate-checklists.md`의 designer 체크를 다시 확인한다.
-- 아래 중 1개라도 실패하면 `designer_status = blocked`, `completion_state = partial`로 두고 종료한다.
-  - designer claim 존재
-  - design export evidence 존재
-  - design board manifest 존재
-  - claim 안의 `developer_targets` 존재
-  - `request-state.json`의 designer status 갱신
+- designer의 상세 체크 정본은 `workflow/checklists/task-gate-checklists.json`과 `workflow/checklists/task-gate-checklists.md`다.
+- 종료 직전 해당 designer 체크를 다시 확인하고, 1개라도 실패하면 `designer_status = blocked`, `completion_state = partial`로 두고 종료한다.
 - 체크를 통과하기 전에는 developer 입장권이 열리지 않는다고 가정하고 작업한다.
 
 ## planner 가이드 우선 계약 (필수)

@@ -74,16 +74,12 @@ hooks:
   - `qa_status`, `covered_scope`
   - 보고서 경로, 테스트케이스 경로
 - QA는 `done ticket`을 직접 만들지 않는다. validator가 체크리스트를 검사해 `qa.done.json`을 발급한다.
+- claim과 evidence는 **이번 시도에서 새로 갱신된 파일**이어야 한다. 이전 시도의 남은 파일은 통과로 인정되지 않는다.
 - `qa_status = done`은 claim/evidence를 남기고 자가 점검을 통과한 경우에만 사용한다.
 
 ## 자가 점검 관문 (필수)
-- QA는 종료 직전에 `workflow/checklists/task-gate-checklists.md`의 qa 체크를 다시 확인한다.
-- 아래 중 1개라도 실패하면 `qa_status = blocked`, `completion_state = partial`로 두고 종료한다.
-  - qa claim 존재
-  - 테스트케이스 파일 존재
-  - QA 상태 요약 파일 존재
-  - QA 검증 보고 존재
-  - `request-state.json`의 qa status 갱신
+- QA의 상세 체크 정본은 `workflow/checklists/task-gate-checklists.json`과 `workflow/checklists/task-gate-checklists.md`다.
+- 종료 직전 해당 qa 체크를 다시 확인하고, 1개라도 실패하면 `qa_status = blocked`, `completion_state = partial`로 두고 종료한다.
 - 체크를 통과하기 전에는 다음 단계 입장권이 열리지 않는다고 가정하고 작업한다.
 
 ## 호출되는 상황 3가지
