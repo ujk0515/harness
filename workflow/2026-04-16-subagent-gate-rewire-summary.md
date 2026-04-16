@@ -24,6 +24,10 @@
 - 여기서 `batch_id`, `item_id`, `role`을 추출한다.
 - 선행 역할의 `done ticket` 또는 `skip ticket`이 없으면 호출을 차단한다.
 - 이미 열린 dispatch가 있으면 두 번째 Agent 호출도 차단한다.
+- 다만 차단 전에 안전한 자동 복구를 먼저 시도한다.
+  - `done/skip ticket`이 이미 있으면 open dispatch를 `completed`로 정리
+  - `SubagentStop` 로그가 있는데 dispatch만 남아 있으면 validator가 종료 검증을 재실행
+  - `agent_id`도 없는 오래된 pending dispatch는 stale로 보고 `rejected` 처리
 - 통과하면 `.dispatch.json`에 pending dispatch를 기록한다.
 
 ### 2. 매핑 다리: `SubagentStart`
@@ -145,6 +149,8 @@
 3. open dispatch가 있는 상태에서 두 번째 Agent를 호출하면 `Another Agent dispatch is already in flight`로 차단된다.
 4. `validator.js` 문법 체크 통과
 5. `settings.json`, checklist json, schema json 파싱 통과
+6. 구버전 `request-state.json` / 구버전 단일 객체 `.dispatch.json`도 자동 보정된다.
+7. `SubagentStop` 로그는 있는데 dispatch가 열린 채 남은 경우, 다음 `PreToolUse`에서 종료 검증을 재실행해 자동 복구된다.
 
 ## 아직 남은 운영 확인
 

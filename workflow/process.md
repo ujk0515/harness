@@ -249,6 +249,10 @@
 - `TaskCreated`, `TaskCompleted`, `TeammateIdle`는 현재 Agent 호출 패턴의 주 게이트로 쓰지 않는다.
 - dispatch sidechannel은 `workspace/planning/.dispatch.json`이고, lock은 `workspace/planning/.dispatch.lock`으로 관리한다.
 - 동시에 둘 이상의 Agent dispatch가 열리면 안 된다. validator는 open dispatch가 남아 있으면 다음 Agent 호출을 차단한다.
+- `PreToolUse(Agent)`는 차단 전에 안전한 자동 복구를 먼저 시도한다.
+  - 이미 `done ticket` / `skip ticket`이 있으면 open dispatch를 `completed`로 정리
+  - `SubagentStop` 흔적은 있는데 dispatch만 열린 경우에는 validator가 체크리스트를 다시 실행해 종료를 복구
+  - `agent_id`도 없이 오래된 pending dispatch는 stale로 보고 `rejected` 처리
 - 이 게이트는 `workflow/checklists/task-gate-checklists.json`과 `request-state.json`을 기준으로 동작한다.
 
 #### 루프백 / 재시도 규칙

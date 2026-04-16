@@ -17,6 +17,7 @@ const DEFAULT_ROLE_ORDER = [
 const STATE_SCHEMA_VERSION = "1.2.0-draft";
 const DISPATCH_SCHEMA_VERSION = "1.0.0-draft";
 const DISPATCH_TERMINAL_STATUSES = new Set(["completed", "blocked", "rejected"]);
+const STALE_PENDING_WITHOUT_AGENT_MS = 30 * 1000;
 
 function readStdin() {
   return new Promise((resolve, reject) => {
@@ -55,6 +56,27 @@ function appendJsonLine(filePath, payload) {
   fs.appendFileSync(filePath, `${JSON.stringify(payload)}\n`, "utf8");
 }
 
+function readJsonLines(filePath) {
+  const fullPath = resolvePath(filePath);
+  if (!fs.existsSync(fullPath)) {
+    return [];
+  }
+
+  return fs
+    .readFileSync(fullPath, "utf8")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
 function getByPath(target, fieldPath) {
   return fieldPath.split(".").reduce((acc, key) => {
     if (acc == null) {
@@ -90,6 +112,93 @@ function defaultState() {
   };
 }
 
+function defaultTicketState() {
+  return {
+    status: "none",
+    path: null,
+    validated_at: null,
+    validated_by: null,
+  };
+}
+
+function normalizeTaskEntry(entry) {
+  return {
+    task_id: entry && entry.task_id ? entry.task_id : `unknown-${Date.now().toString(36)}`,
+    task_subject: entry && "task_subject" in entry ? entry.task_subject : null,
+    task_description: entry && "task_description" in entry ? entry.task_description : null,
+    teammate_name: entry && "teammate_name" in entry ? entry.teammate_name : null,
+    team_name: entry && "team_name" in entry ? entry.team_name : null,
+    batch_id: entry && "batch_id" in entry ? entry.batch_id : null,
+    item_id: entry && "item_id" in entry ? entry.item_id : null,
+    role: entry && "role" in entry ? entry.role : null,
+    lifecycle: entry && entry.lifecycle ? entry.lifecycle : "created",
+    last_event_at: entry && entry.last_event_at ? entry.last_event_at : nowIso(),
+  };
+}
+
+function normalizeRoleState(roleState, roleName) {
+  const base = buildRoleState(roleName, true);
+  const next = roleState && typeof roleState === "object" ? roleState : {};
+
+  return {
+    ...base,
+    ...next,
+    role: roleName,
+    required: next.required !== false,
+    status: next.status || base.status,
+    attempt: Number.isInteger(next.attempt) ? next.attempt : 0,
+    checklist: Array.isArray(next.checklist) ? next.checklist : [],
+    claim_path: "claim_path" in next ? next.claim_path : null,
+    done_ticket: {
+      ...defaultTicketState(),
+      ...(next.done_ticket && typeof next.done_ticket === "object" ? next.done_ticket : {}),
+    },
+    skip_ticket: {
+      ...defaultTicketState(),
+      ...(next.skip_ticket && typeof next.skip_ticket === "object" ? next.skip_ticket : {}),
+    },
+    predecessor_roles: Array.isArray(next.predecessor_roles)
+      ? next.predecessor_roles
+      : base.predecessor_roles,
+    artifacts: Array.isArray(next.artifacts) ? next.artifacts : [],
+    missing_items: Array.isArray(next.missing_items) ? next.missing_items : [],
+    last_error: "last_error" in next ? next.last_error : null,
+    last_updated_at: next.last_updated_at || nowIso(),
+  };
+}
+
+function normalizeItem(item) {
+  const next = item && typeof item === "object" ? item : {};
+  const roleOrder = Array.isArray(next.role_order) && next.role_order.length > 0
+    ? next.role_order.filter((role) => DEFAULT_ROLE_ORDER.includes(role))
+    : [...DEFAULT_ROLE_ORDER];
+
+  const existingRoles = new Map(
+    Array.isArray(next.roles)
+      ? next.roles
+          .filter((entry) => entry && typeof entry === "object" && typeof entry.role === "string")
+          .map((entry) => [entry.role, entry])
+      : []
+  );
+
+  return {
+    item_id: next.item_id || "R0",
+    title: next.title || next.item_id || "Untitled",
+    role_order: roleOrder,
+    retry_limit: Number.isInteger(next.retry_limit) && next.retry_limit > 0 ? next.retry_limit : 3,
+    roles: roleOrder.map((roleName) => normalizeRoleState(existingRoles.get(roleName), roleName)),
+  };
+}
+
+function normalizeBatch(batch) {
+  const next = batch && typeof batch === "object" ? batch : {};
+  return {
+    batch_id: next.batch_id || "Batch0",
+    created_at: next.created_at || nowIso(),
+    items: Array.isArray(next.items) ? next.items.map(normalizeItem) : [],
+  };
+}
+
 function loadState() {
   const statePath = resolvePath("workspace/planning/request-state.json");
   if (!fs.existsSync(statePath)) {
@@ -99,9 +208,7 @@ function loadState() {
   }
 
   const state = parseJsonFile(statePath);
-  if (!state.schema_version) {
-    state.schema_version = STATE_SCHEMA_VERSION;
-  }
+  state.schema_version = STATE_SCHEMA_VERSION;
   if (!state.gate_mode) {
     state.gate_mode = "enforce";
   }
@@ -120,6 +227,8 @@ function loadState() {
   if (!Array.isArray(state.batches)) {
     state.batches = [];
   }
+  state.tasks = state.tasks.map(normalizeTaskEntry);
+  state.batches = state.batches.map(normalizeBatch);
   return state;
 }
 
@@ -151,12 +260,64 @@ function loadDispatchState(state = null) {
   }
 
   const dispatchState = JSON.parse(fs.readFileSync(dispatchPath, "utf8"));
-  if (!dispatchState.schema_version) {
-    dispatchState.schema_version = DISPATCH_SCHEMA_VERSION;
-  }
+  dispatchState.schema_version = DISPATCH_SCHEMA_VERSION;
+
+  // Legacy single-entry format migration:
+  // {
+  //   "batch_id": "...",
+  //   "item_id": "...",
+  //   "role": "...",
+  //   "status": "open",
+  //   "created_at": "..."
+  // }
   if (!Array.isArray(dispatchState.entries)) {
-    dispatchState.entries = [];
+    if (dispatchState.batch_id && dispatchState.item_id && dispatchState.role) {
+      dispatchState.entries = [
+        {
+          tool_use_id: dispatchState.tool_use_id || `legacy:${dispatchState.batch_id}:${dispatchState.item_id}:${dispatchState.role}`,
+          session_id: dispatchState.session_id || null,
+          batch_id: dispatchState.batch_id,
+          item_id: dispatchState.item_id,
+          role: dispatchState.role,
+          summary: dispatchState.summary || dispatchState.item_id,
+          description: dispatchState.description || null,
+          subagent_type: dispatchState.subagent_type || null,
+          status: dispatchState.status === "open" ? "pending" : (dispatchState.status || "pending"),
+          created_at: dispatchState.created_at || nowIso(),
+          claimed_at: dispatchState.claimed_at || null,
+          finished_at: dispatchState.finished_at || null,
+          agent_id: dispatchState.agent_id || null,
+          agent_type: dispatchState.agent_type || null,
+          last_assistant_message: dispatchState.last_assistant_message || null,
+          stop_reason: dispatchState.stop_reason || null,
+        },
+      ];
+    } else {
+      dispatchState.entries = [];
+    }
   }
+
+  dispatchState.entries = dispatchState.entries
+    .filter((entry) => entry && typeof entry === "object")
+    .map((entry) => ({
+      tool_use_id: entry.tool_use_id || `dispatch:${Date.now().toString(36)}`,
+      session_id: "session_id" in entry ? entry.session_id : null,
+      batch_id: entry.batch_id || null,
+      item_id: entry.item_id || null,
+      role: entry.role || null,
+      summary: "summary" in entry ? entry.summary : entry.item_id || null,
+      description: "description" in entry ? entry.description : null,
+      subagent_type: "subagent_type" in entry ? entry.subagent_type : null,
+      status: entry.status || "pending",
+      created_at: entry.created_at || nowIso(),
+      claimed_at: "claimed_at" in entry ? entry.claimed_at : null,
+      finished_at: "finished_at" in entry ? entry.finished_at : null,
+      agent_id: "agent_id" in entry ? entry.agent_id : null,
+      agent_type: "agent_type" in entry ? entry.agent_type : null,
+      last_assistant_message: "last_assistant_message" in entry ? entry.last_assistant_message : null,
+      stop_reason: "stop_reason" in entry ? entry.stop_reason : null,
+    }));
+
   return dispatchState;
 }
 
@@ -442,8 +603,8 @@ function getEvidenceDirPath(state, meta) {
 }
 
 function hasOpenDispatch(dispatchState) {
-  return dispatchState.entries.some(
-    (entry) => !DISPATCH_TERMINAL_STATUSES.has(entry.status)
+  return (dispatchState.entries || []).some(
+    (entry) => entry && !DISPATCH_TERMINAL_STATUSES.has(entry.status || "pending")
   );
 }
 
@@ -456,6 +617,38 @@ function findDispatchByAgentId(dispatchState, agentId) {
       .reverse()
       .find((entry) => entry.agent_id && entry.agent_id === agentId) || null
   );
+}
+
+function findLatestHookEvent(predicate) {
+  const events = readJsonLines("workspace/reports/hook-events.jsonl");
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (predicate(events[index])) {
+      return events[index];
+    }
+  }
+  return null;
+}
+
+function findLatestSubagentStopEvent(agentId) {
+  if (!agentId) {
+    return null;
+  }
+  return findLatestHookEvent(
+    (event) =>
+      event &&
+      event.hook_event_name === "SubagentStop" &&
+      event.payload &&
+      event.payload.agent_id === agentId
+  );
+}
+
+function buildMetaFromDispatchEntry(entry) {
+  return {
+    batch_id: entry.batch_id,
+    item_id: entry.item_id,
+    role: entry.role,
+    summary: entry.summary || entry.item_id,
+  };
 }
 
 function parseAgentToolInput(payload) {
@@ -537,8 +730,8 @@ function collectPredecessorFailures(item, currentRole) {
     .filter((entry) => entry.required !== false)
     .filter(
       (entry) =>
-        entry.done_ticket.status !== "issued" &&
-        entry.skip_ticket.status !== "issued"
+        (entry.done_ticket && entry.done_ticket.status) !== "issued" &&
+        (entry.skip_ticket && entry.skip_ticket.status) !== "issued"
     )
     .map((entry) => `${entry.role} done/skip ticket missing`);
 }
@@ -949,6 +1142,19 @@ async function handlePreToolUseAgent() {
   const retryLimit = context.item.retry_limit || 3;
   const predecessorFailures = collectPredecessorFailures(context.item, meta.role);
 
+  const recoveredEntries = recoverOpenDispatches(state);
+  if (recoveredEntries.length > 0) {
+    appendJsonLine(resolvePath("workspace/reports/hook-events.jsonl"), {
+      logged_at: nowIso(),
+      hook_event_name: "DispatchRecovery",
+      task_meta: meta,
+      extra: {
+        stage: "pretool-agent-recovery",
+        recovered_entries: recoveredEntries,
+      },
+    });
+  }
+
   let blockedReason = null;
   let dispatchEntry = null;
 
@@ -981,7 +1187,7 @@ async function handlePreToolUseAgent() {
       dispatchState.entries.push(dispatchEntry);
     }, state);
   } catch (error) {
-    blockedReason = `Dispatch lock error: ${error.message}`;
+    blockedReason = `PreToolUse gate error: ${error.message}`;
   }
 
   context.roleState.claim_path = path.relative(resolveProjectRoot(), getClaimPath(state, meta));
@@ -1006,6 +1212,244 @@ async function handlePreToolUseAgent() {
   if (blockedReason && state.gate_mode === "enforce") {
     stderrBlock(blockedReason);
   }
+}
+
+function finalizeDispatchEntry(state, dispatchEntry, payload) {
+  const meta = buildMetaFromDispatchEntry(dispatchEntry);
+  const context = getStateContext(state, meta);
+  const checklistDefinitions = loadChecklistDefinitions();
+  const checks = checklistDefinitions.roles[meta.role] || [];
+  const predecessorFailures = collectPredecessorFailures(context.item, meta.role);
+  const retryLimit = context.item.retry_limit || 3;
+  const checklistContext = {
+    batch_id: meta.batch_id,
+    item_id: meta.item_id,
+    role: meta.role,
+    batch_index: context.batchIndex,
+    item_index: context.itemIndex,
+    role_index: context.roleIndex,
+    dispatch_created_at: dispatchEntry.created_at,
+    dispatch_claimed_at: dispatchEntry.claimed_at,
+    dispatch_finished_at: dispatchEntry.finished_at || nowIso(),
+  };
+
+  context.roleState.attempt += 1;
+  context.roleState.claim_path = path.relative(resolveProjectRoot(), getClaimPath(state, meta));
+  context.roleState.artifacts = [
+    {
+      kind: "claim",
+      path: path.relative(resolveProjectRoot(), getClaimPath(state, meta)),
+      mtime: checkFileExists(path.relative(resolveProjectRoot(), getClaimPath(state, meta)))
+        ? new Date(fs.statSync(getClaimPath(state, meta)).mtimeMs).toISOString()
+        : dispatchEntry.created_at,
+    },
+    {
+      kind: "evidence_dir",
+      path: path.relative(resolveProjectRoot(), getEvidenceDirPath(state, meta)),
+      mtime: fs.existsSync(getEvidenceDirPath(state, meta))
+        ? new Date(fs.statSync(getEvidenceDirPath(state, meta)).mtimeMs).toISOString()
+        : dispatchEntry.created_at,
+    },
+  ];
+  context.roleState.status = "done";
+  context.roleState.last_updated_at = nowIso();
+  saveState(state);
+
+  const results = runChecklist(state, checklistContext, checks);
+  context.roleState.checklist = results.map((entry) => ({
+    id: entry.id,
+    label: entry.label,
+    command: entry.command,
+    status: entry.status,
+    evidence_paths: entry.evidence_paths,
+  }));
+
+  const failedChecks = results.filter((entry) => entry.status !== "pass");
+  const failures = [
+    ...predecessorFailures,
+    ...failedChecks.map((entry) => `${entry.id}: ${entry.label}`),
+  ];
+
+  const predecessorTicketPaths = (context.item.roles || [])
+    .filter(
+      (entry) =>
+        entry.role !== meta.role &&
+        (entry.done_ticket.status === "issued" || entry.skip_ticket.status === "issued")
+    )
+    .map((entry) => entry.done_ticket.path || entry.skip_ticket.path)
+    .filter(Boolean);
+
+  if (failures.length > 0) {
+    const validatedAt = nowIso();
+    context.roleState.status = "blocked";
+    context.roleState.missing_items = failures;
+    context.roleState.last_error = summarizeFailures(failures);
+    context.roleState.last_updated_at = validatedAt;
+
+    rejectDoneTicket(
+      state,
+      meta,
+      context.roleState,
+      buildTicketPayload(state, meta, {
+        status: "rejected",
+        ticket_kind: "done",
+        validated_at: validatedAt,
+        task_subject: dispatchEntry.description,
+        teammate_name: payload.agent_id || null,
+        checklist: context.roleState.checklist,
+        artifacts: context.roleState.artifacts,
+        predecessor_tickets: predecessorTicketPaths,
+        reason: summarizeFailures(failures),
+      })
+    );
+
+    saveState(state);
+    return {
+      ok: false,
+      retryLimit,
+      failures,
+      meta,
+      status: context.roleState.attempt >= retryLimit ? "rejected" : "blocked",
+      validatedAt,
+    };
+  }
+
+  const validatedAt = nowIso();
+  context.roleState.status = "done";
+  context.roleState.missing_items = [];
+  context.roleState.last_error = null;
+  context.roleState.last_updated_at = validatedAt;
+
+  issueTicket(
+    state,
+    meta,
+    context.roleState,
+    "done",
+    buildTicketPayload(state, meta, {
+      status: "issued",
+      ticket_kind: "done",
+      validated_at: validatedAt,
+      task_subject: dispatchEntry.description,
+      teammate_name: payload.agent_id || null,
+      checklist: context.roleState.checklist,
+      artifacts: context.roleState.artifacts,
+      predecessor_tickets: predecessorTicketPaths,
+      reason: null,
+    })
+  );
+
+  saveState(state);
+  return {
+    ok: true,
+    retryLimit,
+    failures: [],
+    meta,
+    status: "completed",
+    validatedAt,
+  };
+}
+
+function recoverOpenDispatches(state) {
+  const recoveredEntries = [];
+
+  withDispatchLock((dispatchState) => {
+    for (const entry of dispatchState.entries || []) {
+      if (!entry || DISPATCH_TERMINAL_STATUSES.has(entry.status)) {
+        continue;
+      }
+
+      const meta = buildMetaFromDispatchEntry(entry);
+      if (!meta.batch_id || !meta.item_id || !meta.role) {
+        entry.status = "rejected";
+        entry.stop_reason = "invalid dispatch entry";
+        entry.finished_at = nowIso();
+        recoveredEntries.push({
+          batch_id: entry.batch_id || null,
+          item_id: entry.item_id || null,
+          role: entry.role || null,
+          resolution: "rejected_invalid_dispatch",
+        });
+        continue;
+      }
+
+      const context = getStateContext(state, meta);
+      const roleState = context.roleState;
+
+      if (roleState.done_ticket.status === "issued" || roleState.skip_ticket.status === "issued") {
+        entry.status = "completed";
+        entry.stop_reason = null;
+        entry.finished_at =
+          roleState.done_ticket.validated_at ||
+          roleState.skip_ticket.validated_at ||
+          nowIso();
+        recoveredEntries.push({
+          batch_id: meta.batch_id,
+          item_id: meta.item_id,
+          role: meta.role,
+          resolution: "completed_from_ticket",
+        });
+        continue;
+      }
+
+      if (roleState.done_ticket.status === "rejected" || roleState.status === "blocked") {
+        entry.status = "rejected";
+        entry.stop_reason = roleState.last_error || "role blocked";
+        entry.finished_at = roleState.last_updated_at || nowIso();
+        recoveredEntries.push({
+          batch_id: meta.batch_id,
+          item_id: meta.item_id,
+          role: meta.role,
+          resolution: "rejected_from_state",
+        });
+        continue;
+      }
+
+      if (entry.agent_id) {
+        const stopEvent = findLatestSubagentStopEvent(entry.agent_id);
+        if (stopEvent && stopEvent.payload) {
+          entry.finished_at = entry.finished_at || stopEvent.logged_at || nowIso();
+          entry.last_assistant_message =
+            stopEvent.payload.last_assistant_message || entry.last_assistant_message || null;
+          const result = finalizeDispatchEntry(state, entry, stopEvent.payload);
+          entry.status = result.status;
+          entry.stop_reason = result.ok ? null : summarizeFailures(result.failures);
+          entry.finished_at = result.validatedAt;
+          recoveredEntries.push({
+            batch_id: meta.batch_id,
+            item_id: meta.item_id,
+            role: meta.role,
+            resolution: result.ok ? "completed_from_stop_event" : "rejected_from_stop_event",
+          });
+          continue;
+        }
+      }
+
+      const createdAt = Date.parse(entry.created_at || "");
+      const staleWithoutAgent =
+        !entry.agent_id &&
+        !Number.isNaN(createdAt) &&
+        Date.now() - createdAt > STALE_PENDING_WITHOUT_AGENT_MS;
+
+      if (staleWithoutAgent) {
+        const reason = "stale dispatch without SubagentStart";
+        entry.status = "rejected";
+        entry.stop_reason = reason;
+        entry.finished_at = nowIso();
+        roleState.status = "blocked";
+        roleState.last_error = reason;
+        roleState.last_updated_at = nowIso();
+        recoveredEntries.push({
+          batch_id: meta.batch_id,
+          item_id: meta.item_id,
+          role: meta.role,
+          resolution: "rejected_stale_pending_without_agent",
+        });
+      }
+    }
+  }, state);
+
+  saveState(state);
+  return recoveredEntries;
 }
 
 async function handleSubagentStart() {
@@ -1129,150 +1573,26 @@ async function handleSubagentStop() {
     role: dispatchEntry.role,
     summary: dispatchEntry.summary,
   };
-  const context = getStateContext(state, meta);
-  const checklistDefinitions = loadChecklistDefinitions();
-  const checks = checklistDefinitions.roles[meta.role] || [];
-  const predecessorFailures = collectPredecessorFailures(context.item, meta.role);
-  const retryLimit = context.item.retry_limit || 3;
-  const checklistContext = {
-    batch_id: meta.batch_id,
-    item_id: meta.item_id,
-    role: meta.role,
-    batch_index: context.batchIndex,
-    item_index: context.itemIndex,
-    role_index: context.roleIndex,
-    dispatch_created_at: dispatchEntry.created_at,
-    dispatch_claimed_at: dispatchEntry.claimed_at,
-    dispatch_finished_at: dispatchEntry.finished_at,
-  };
-
-  context.roleState.attempt += 1;
-  context.roleState.claim_path = path.relative(resolveProjectRoot(), getClaimPath(state, meta));
-  context.roleState.artifacts = [
-    {
-      kind: "claim",
-      path: path.relative(resolveProjectRoot(), getClaimPath(state, meta)),
-      mtime: checkFileExists(path.relative(resolveProjectRoot(), getClaimPath(state, meta)))
-        ? new Date(fs.statSync(getClaimPath(state, meta)).mtimeMs).toISOString()
-        : dispatchEntry.created_at,
-    },
-    {
-      kind: "evidence_dir",
-      path: path.relative(resolveProjectRoot(), getEvidenceDirPath(state, meta)),
-      mtime: checkFileExists(path.relative(resolveProjectRoot(), getEvidenceDirPath(state, meta)))
-        ? new Date(fs.statSync(getEvidenceDirPath(state, meta)).mtimeMs).toISOString()
-        : dispatchEntry.created_at,
-    },
-  ];
-  context.roleState.status = "done";
-  context.roleState.last_updated_at = nowIso();
-  saveState(state);
-
-  const results = runChecklist(state, checklistContext, checks);
-  context.roleState.checklist = results.map((entry) => ({
-    id: entry.id,
-    label: entry.label,
-    command: entry.command,
-    status: entry.status,
-    evidence_paths: entry.evidence_paths,
-  }));
-
-  const failedChecks = results.filter((entry) => entry.status !== "pass");
-  const failures = [
-    ...predecessorFailures,
-    ...failedChecks.map((entry) => `${entry.id}: ${entry.label}`),
-  ];
-
-  const predecessorTicketPaths = (context.item.roles || [])
-    .filter(
-      (entry) =>
-        entry.role !== meta.role &&
-        (entry.done_ticket.status === "issued" || entry.skip_ticket.status === "issued")
-    )
-    .map((entry) => entry.done_ticket.path || entry.skip_ticket.path)
-    .filter(Boolean);
-
-  if (failures.length > 0) {
-    const validatedAt = nowIso();
-    context.roleState.status = "blocked";
-    context.roleState.missing_items = failures;
-    context.roleState.last_error = summarizeFailures(failures);
-    context.roleState.last_updated_at = validatedAt;
-
-    rejectDoneTicket(
-      state,
-      meta,
-      context.roleState,
-      buildTicketPayload(state, meta, {
-        status: "rejected",
-        ticket_kind: "done",
-        validated_at: validatedAt,
-        task_subject: dispatchEntry.description,
-        teammate_name: payload.agent_id || null,
-        checklist: context.roleState.checklist,
-        artifacts: context.roleState.artifacts,
-        predecessor_tickets: predecessorTicketPaths,
-        reason: summarizeFailures(failures),
-      })
-    );
-
-    withDispatchLock((dispatchState) => {
-      const latest = findDispatchByAgentId(dispatchState, payload.agent_id || null);
-      if (latest) {
-        latest.status = context.roleState.attempt >= retryLimit ? "rejected" : "blocked";
-        latest.stop_reason = summarizeFailures(failures);
-        latest.finished_at = validatedAt;
-      }
-    }, state);
-
-    saveState(state);
-
-    if (state.gate_mode === "enforce") {
-      const prefix =
-        context.roleState.attempt >= retryLimit
-          ? "Retry limit reached. Escalate to user."
-          : "Subagent completion blocked.";
-      stderrBlock(
-        `${prefix} ${meta.batch_id}/${meta.item_id}/${meta.role}: ${summarizeFailures(failures)}`
-      );
-    }
-    return;
-  }
-
-  const validatedAt = nowIso();
-  context.roleState.status = "done";
-  context.roleState.missing_items = [];
-  context.roleState.last_error = null;
-  context.roleState.last_updated_at = validatedAt;
-
-  issueTicket(
-    state,
-    meta,
-    context.roleState,
-    "done",
-    buildTicketPayload(state, meta, {
-      status: "issued",
-      ticket_kind: "done",
-      validated_at: validatedAt,
-      task_subject: dispatchEntry.description,
-      teammate_name: payload.agent_id || null,
-      checklist: context.roleState.checklist,
-      artifacts: context.roleState.artifacts,
-      predecessor_tickets: predecessorTicketPaths,
-      reason: null,
-    })
-  );
+  const result = finalizeDispatchEntry(state, dispatchEntry, payload);
 
   withDispatchLock((dispatchState) => {
     const latest = findDispatchByAgentId(dispatchState, payload.agent_id || null);
     if (latest) {
-      latest.status = "completed";
-      latest.stop_reason = null;
-      latest.finished_at = validatedAt;
+      latest.status = result.status;
+      latest.stop_reason = result.ok ? null : summarizeFailures(result.failures);
+      latest.finished_at = result.validatedAt;
     }
   }, state);
 
-  saveState(state);
+  if (!result.ok && state.gate_mode === "enforce") {
+    const prefix =
+      result.status === "rejected"
+        ? "Retry limit reached. Escalate to user."
+        : "Subagent completion blocked.";
+    stderrBlock(
+      `${prefix} ${meta.batch_id}/${meta.item_id}/${meta.role}: ${summarizeFailures(result.failures)}`
+    );
+  }
 }
 
 function handleIssueSkip(args) {
