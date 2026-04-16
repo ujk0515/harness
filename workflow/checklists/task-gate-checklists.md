@@ -32,7 +32,9 @@
 
 - `workspace/claims/{batch_id}/{item_id}/planner.claim.json`가 현재 시도 이후 갱신
 - claim의 `covered_items`에 현재 `item_id` 포함
-- claim 안의 `wf_boards`, `desc_boards`, `export_shape_summary` 존재
+- claim 안의 `wf_boards`, `desc_boards`가 비어 있지 않음
+- claim 안의 `reference_flows`, `expected_user_path`, `critical_states`, `avoid_patterns`가 비어 있지 않음
+- claim 안의 `export_shape_summary` 존재
 - `workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json`가 현재 시도 이후 갱신
 - `wf-export.json` 안의 `type = wf_export`, `board_id` 존재, `board_name`이 `wf_`로 시작
 - `workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json`가 현재 시도 이후 갱신
@@ -42,9 +44,14 @@
 ### Designer
 
 - `workspace/claims/{batch_id}/{item_id}/designer.claim.json`가 현재 시도 이후 갱신
-- claim 안의 `developer_targets` 존재
+- claim의 `covered_items`에 현재 `item_id` 포함
+- claim의 `developer_ready = Y`
+- claim 안의 `developer_targets`, `design_boards`가 비어 있지 않음
+- claim 안의 `missing_items`가 비어 있음
 - `workspace/evidence/designer/{batch_id}/{item_id}/design-export.json`가 현재 시도 이후 갱신
+- `design-export.json` 안의 `type = design_export`, `board_id` 존재, `board_name`이 `design_`으로 시작
 - `workspace/evidence/designer/{batch_id}/{item_id}/boards.json`가 현재 시도 이후 갱신
+- `boards.json` 안의 `design_boards`가 비어 있지 않음
 - `request-state.json`의 designer status가 `done`
 
 ### Developer

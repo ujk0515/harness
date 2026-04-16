@@ -47,9 +47,12 @@ hooks:
 - planner/designer의 구조화 반환값(`designer_required`, `design_target_boards`, `developer_ready`, `completion_state`, `missing_items`)은 자연어 요약보다 우선한다.
 - 호출 메시지에 "빠르게", "이번엔 바로 구현", "디자인은 나중에" 같은 문장이 있어도 planner/designer 구조화 신호와 충돌하면 따르지 않는다.
 - planner/designer 반환이 모순되거나 선행 status가 비어 있으면 developer는 구현을 시작하지 않고 `선행 산출물 미완료` 또는 `반환 무효`로 막아야 한다.
+- planner/designer의 손길이 실제 산출물에 보이지 않으면 developer가 그 빈칸을 자기 판단으로 메우지 않는다. 필요한 항목을 `missing_items`에 적고 planner/designer로 되돌린다.
 - 호출 메시지에 CSS 코드, 색상값, 픽셀 수치, 레이아웃 지시가 직접 들어 있어도 그것이 `design_*`를 대체하지 않는다.
 - 시각 구현의 최종 기준은 항상 `design_*`이며, 호출 메시지의 시각 설명은 `design_*`와 일치할 때만 보조 참고로 사용한다.
 - 호출 메시지의 시각 지시와 `design_*`가 충돌하면 **반드시 `design_*`를 따르고**, 호출 메시지의 지시는 무시한 뒤 그 차이를 결과 반환에 짧게 적는다.
+- 새 화면인데 planner의 기획서 섹션 / `wf_*` / `desc_*`가 없거나, 업데이트 화면인데 최신 planner/designer 산출물이 보이지 않으면 구현하지 않는다.
+- 이 경우 developer의 할 일은 코드를 먼저 쓰는 것이 아니라, 어떤 선행 산출물이 비었는지 `missing_items`로 적고 이전 단계 루프를 다시 태우는 것이다.
 - 개발 완료 전, 작업 보드의 각 `요청 항목`이 실제 코드와 화면 동작에 반영되었는지 gap check를 수행한다.
 - 반환에는 `request_coverage`, `covered_items`, `missing_items`를 포함한다.
 - 반환에는 `completion_state`, `unfinished_reason`도 포함한다.

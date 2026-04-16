@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1.0",
+  "schema_version": "1.2.0",
   "roles": {
     "planner": [
       {
@@ -14,13 +14,33 @@
       },
       {
         "id": "planner_claim_has_wf_boards",
-        "label": "planner claim 안의 wf_boards 존재",
-        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/planner.claim.json wf_boards"
+        "label": "planner claim 안의 wf_boards가 비어 있지 않음",
+        "command": "node .claude/scripts/validator.js check json_array_nonempty workspace/claims/{batch_id}/{item_id}/planner.claim.json wf_boards"
       },
       {
         "id": "planner_claim_has_desc_boards",
-        "label": "planner claim 안의 desc_boards 존재",
-        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/planner.claim.json desc_boards"
+        "label": "planner claim 안의 desc_boards가 비어 있지 않음",
+        "command": "node .claude/scripts/validator.js check json_array_nonempty workspace/claims/{batch_id}/{item_id}/planner.claim.json desc_boards"
+      },
+      {
+        "id": "planner_claim_has_reference_flows",
+        "label": "planner claim 안의 reference_flows가 비어 있지 않음",
+        "command": "node .claude/scripts/validator.js check json_array_nonempty workspace/claims/{batch_id}/{item_id}/planner.claim.json reference_flows"
+      },
+      {
+        "id": "planner_claim_has_expected_user_path",
+        "label": "planner claim 안의 expected_user_path가 비어 있지 않음",
+        "command": "node .claude/scripts/validator.js check json_array_nonempty workspace/claims/{batch_id}/{item_id}/planner.claim.json expected_user_path"
+      },
+      {
+        "id": "planner_claim_has_critical_states",
+        "label": "planner claim 안의 critical_states가 비어 있지 않음",
+        "command": "node .claude/scripts/validator.js check json_array_nonempty workspace/claims/{batch_id}/{item_id}/planner.claim.json critical_states"
+      },
+      {
+        "id": "planner_claim_has_avoid_patterns",
+        "label": "planner claim 안의 avoid_patterns가 비어 있지 않음",
+        "command": "node .claude/scripts/validator.js check json_array_nonempty workspace/claims/{batch_id}/{item_id}/planner.claim.json avoid_patterns"
       },
       {
         "id": "planner_claim_has_export_shape_summary",
@@ -80,9 +100,29 @@
         "command": "node .claude/scripts/validator.js check mtime_after workspace/claims/{batch_id}/{item_id}/designer.claim.json {dispatch_created_at}"
       },
       {
-        "id": "designer_targets_truthy",
-        "label": "designer claim 안의 developer_targets 존재",
-        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/designer.claim.json developer_targets"
+        "id": "designer_claim_covers_item",
+        "label": "designer claim의 covered_items에 현재 item_id가 포함됨",
+        "command": "node .claude/scripts/validator.js check json_array_contains workspace/claims/{batch_id}/{item_id}/designer.claim.json covered_items {item_id}"
+      },
+      {
+        "id": "designer_developer_ready_yes",
+        "label": "designer claim의 developer_ready = Y",
+        "command": "node .claude/scripts/validator.js check json_field_equals workspace/claims/{batch_id}/{item_id}/designer.claim.json developer_ready Y"
+      },
+      {
+        "id": "designer_targets_nonempty",
+        "label": "designer claim 안의 developer_targets가 비어 있지 않음",
+        "command": "node .claude/scripts/validator.js check json_array_nonempty workspace/claims/{batch_id}/{item_id}/designer.claim.json developer_targets"
+      },
+      {
+        "id": "designer_design_boards_nonempty",
+        "label": "designer claim 안의 design_boards가 비어 있지 않음",
+        "command": "node .claude/scripts/validator.js check json_array_nonempty workspace/claims/{batch_id}/{item_id}/designer.claim.json design_boards"
+      },
+      {
+        "id": "designer_missing_items_empty",
+        "label": "designer claim 안의 missing_items가 비어 있음",
+        "command": "node .claude/scripts/validator.js check json_array_empty workspace/claims/{batch_id}/{item_id}/designer.claim.json missing_items"
       },
       {
         "id": "designer_design_export_recent",
@@ -90,9 +130,29 @@
         "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/designer/{batch_id}/{item_id}/design-export.json {dispatch_created_at}"
       },
       {
+        "id": "designer_design_export_type",
+        "label": "designer design-export evidence의 type = design_export",
+        "command": "node .claude/scripts/validator.js check json_field_equals workspace/evidence/designer/{batch_id}/{item_id}/design-export.json type design_export"
+      },
+      {
+        "id": "designer_design_export_board_id",
+        "label": "designer design-export evidence의 board_id 존재",
+        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/evidence/designer/{batch_id}/{item_id}/design-export.json board_id"
+      },
+      {
+        "id": "designer_design_export_board_name",
+        "label": "designer design-export evidence의 board_name이 design_으로 시작",
+        "command": "node .claude/scripts/validator.js check json_field_matches workspace/evidence/designer/{batch_id}/{item_id}/design-export.json board_name ^design_"
+      },
+      {
         "id": "designer_boards_recent",
         "label": "designer boards manifest가 현재 시도 이후 갱신됨",
         "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/designer/{batch_id}/{item_id}/boards.json {dispatch_created_at}"
+      },
+      {
+        "id": "designer_boards_manifest_nonempty",
+        "label": "designer boards manifest 안의 design_boards가 비어 있지 않음",
+        "command": "node .claude/scripts/validator.js check json_array_nonempty workspace/evidence/designer/{batch_id}/{item_id}/boards.json design_boards"
       },
       {
         "id": "designer_state_done",

@@ -177,6 +177,36 @@
 - `tester_status`
 - `비고`
 
+#### 배치 fan-out / item 단위 호출 규칙
+- `Batch`는 묶음 단위일 뿐이고, **게이트를 통과하는 실제 Agent 호출은 항상 item 단위**다.
+- 하네스는 현재 요청 배치의 열린 항목을 읽고, `R1`, `R2` 같은 `item_id`별로 Agent를 따로 호출한다.
+- 한 번의 gated Agent 호출에 여러 `item_id`를 섞지 않는다. 한 호출은 정확히 하나의 `item_id`만 담당한다.
+- 모든 gated Agent `description`은 `item_id`가 포함된 형식만 사용한다.
+  - 예: `[Batch9][R18][planner] plan: place-add accom info`
+  - 예: `[Batch9][R18][planner] revise: place-add accom info`
+  - 예: `[Batch9][R18][designer] review: ux review place-add accom info`
+  - 예: `[Batch9][R18][designer] apply: design apply place-add accom info`
+- 배치 전체를 한 줄 요약으로 묶어 planner/designer/developer를 통째로 호출하는 방식은 금지한다.
+
+#### planner / designer 모드 규칙
+- planner는 item 단위에서 `plan:` 또는 `revise:` 모드로만 호출한다.
+- `plan:`은 루프 A-1의 최초 기획 작성이다.
+- `revise:`는 디자이너 리뷰 이후 같은 `item_id`를 다시 여는 재기획이다.
+- designer는 `review:` 또는 `apply:` 모드로만 호출한다.
+- `review:`는 UX 리뷰 전용이다. `design_*`를 만들지 않고 `designer.done`을 발급하지 않는다.
+- `apply:`는 실제 `design_*` 생성/수정 전용이다. 이 모드만 `designer.done` 대상이다.
+- 위 mode prefix가 없으면 게이트에서 차단한다.
+
+#### request-state 초기화 시점 (필수)
+- 작업 보드 생성 직후, 하네스는 **첫 Agent 호출 전에** 현재 배치의 각 `item_id`를 `request-state.json`에 먼저 등록한다.
+- 등록 명령:
+  - `node .claude/scripts/validator.js ensure-state-item Batch{N} R{M} "{요청 항목 요약}"`
+- 이 초기화가 끝나기 전에는 gated Agent를 호출하지 않는다.
+- 목적:
+  - 첫 `PreToolUse(Agent)` 이전에 batch/item/role 컨텍스트를 안정적으로 확보
+  - 첫 호출에서 빈 state 때문에 `todo/blocked`가 뒤엉키는 것을 방지
+  - item 단위 role order / retry_limit / status 기본값을 고정
+
 #### 작업 보드 상태 수명주기
 - 상태값은 모든 컬럼에서 `todo`, `in_progress`, `done`, `blocked`, `skipped`만 사용한다.
 - 하네스는 새 요청을 작업 보드에 반영한 직후 모든 신규 항목의 `overall_status`를 `todo`로 기록한다.
@@ -278,6 +308,15 @@
   - designer가 완료됐더라도 `developer_ready = Y`가 아니면 호출 금지
 - QA/tester 호출 전에도 같은 방식으로 developer `completion_state`, 역할 status, `missing_items`를 함께 확인한다.
 - 단, 최종 하드 게이트는 `status`보다 `done ticket` / `skip ticket`이다. status가 `done`이어도 ticket이 없으면 호출 금지다.
+
+#### 선행 산출물 부족 시 역방향 루프 규칙
+- 현재 역할은 앞 단계 산출물이 부족한데도 자기 판단으로 빈칸을 메우지 않는다. 부족한 항목은 `missing_items`와 `unfinished_reason`에 적고 자기 status를 `blocked`로 둔다.
+- 하네스는 이 `missing_items`를 그대로 이전 필수 역할에 전달해 같은 `item_id`를 이전 단계로 되돌린다. 현재 역할을 억지로 완료 처리하거나 다음 역할로 건너뛰지 않는다.
+- designer는 새 화면 작업인데 planner가 만든 기획서 섹션 + 대응 `wf_*` / `desc_*`가 없으면 디자인을 시작하지 않고 planner로 되돌린다.
+- designer는 업데이트 화면이라도 planner의 최신 손길이 기획서 / `wf_*` / `desc_*` / planner claim에서 보이지 않으면 디자인을 시작하지 않고 planner로 되돌린다.
+- developer는 UI-visible 변경인데 최신 `wf_*` / `desc_*` / `design_*` 또는 구조화 handoff가 부족하면 구현하지 않고 planner/designer로 되돌린다.
+- QA/tester는 검증 기준 산출물이나 구현 evidence가 부족하면 PASS/FAIL을 억지로 내리지 않고 developer로 되돌린다.
+- 어떤 역할도 `"이 정도면 되겠지"`, `"앞 단계가 비었지만 내가 알아서"` 같은 식으로 선행 역할의 몫을 대신하지 않는다.
 
 #### skipped 사용 규칙
 - `skipped`는 편의상 넘기는 값이 아니다. **명시적 면제**가 있는 경우에만 허용한다.
@@ -503,23 +542,26 @@
 5. 이 파일을 기획자 호출 시 함께 전달한다
 
 ### 루프 A-1: 기획서 + Penpot 와이어프레임 작성 + 디자이너 UX 리뷰
-1. Agent(planner) 호출: "요구사항: {X}. 작업 보드: workspace/planning/request-workboard.md. 벤치마킹: workspace/planning/A-benchmark.md. 기획서 작성 + Penpot 와이어프레임 생성해. 각 화면마다 `wf_[id]` Board와 `desc_[id]` Board를 따로 만들고, 라벨/디스크립션/상태별 화면을 포함해"
+1. 현재 요청 배치의 열린 각 `item_id`마다 순서대로 아래를 수행한다.
+2. `node .claude/scripts/validator.js ensure-state-item Batch{N} R{M} "{요청 항목 요약}"`로 state를 초기화한다.
+3. Agent(planner) 호출: `"[Batch{N}][R{M}][planner] plan: {요청 항목 요약}"` + "요구사항: {item 기준 요약}. 작업 보드: workspace/planning/request-workboard.md. 벤치마킹: workspace/planning/A-benchmark.md. 먼저 유사 흐름/많이 쓰는 UX 패턴/사용자 관성을 조사·취합한 뒤 기획서 작성 + Penpot 와이어프레임 생성해. 각 화면마다 `wf_[id]` Board와 `desc_[id]` Board를 따로 만들고, 라벨/디스크립션/상태별 화면을 포함해"
    - 작업 보드에 `matched_screen_id = 없음`이고 CREATE 후보 사유가 있으면 planner는 신규 화면 여부를 먼저 확정한다
    - 신규 화면으로 확정되면 새 `wf_*` / `desc_*`를 만들고, 디자이너에게 `action: CREATE` 가이드를 넘긴다
    - planner는 결과를 반환하기 전에 작업 보드의 각 `요청 항목`이 기획서 + `wf_*` + `desc_*`에 반영되었는지 gap check를 수행하고 `request_coverage`를 함께 반환한다
    - 신규 화면으로 확정된 항목도 루프 A-3 이후 일반 화면과 동일하게 `developer → QA/tester → secretary` 흐름으로 이어진다
-2. Agent(designer) 호출: "기획서: {경로}. `wf_*`와 `desc_*`를 확인해서 UX 관점으로 리뷰해. 개선 필요 여부 판단해"
-3. 개선사항 없음 → 루프 A-2 건너뛰고 A-3으로
-4. 개선사항 있음 → 루프 A-2로
+4. Agent(designer) 호출: `"[Batch{N}][R{M}][designer] review: ux review {요청 항목 요약}"` + "기획서: {경로}. `wf_*`와 `desc_*`를 확인해서 UX 관점으로 리뷰해. 개선 필요 여부 판단해"
+5. 개선사항 없음 → 해당 `item_id`는 루프 A-2 건너뛰고 A-3으로
+6. 개선사항 있음 → 해당 `item_id`는 루프 A-2로
 
 ### 루프 A-2: 디자이너 ↔ 기획자 화면 개선
-1. Agent(planner) 호출: "디자이너 리뷰: {경로}. 작업 보드: workspace/planning/request-workboard.md. 반영하여 기획서 수정 + `wf_*` + `desc_*` 수정해"
-2. Agent(designer) 호출: "기획서 + `wf_*` + `desc_*`를 재검토해. 점수 반환해"
-3. 통과 기준 미만 → 1번 반복
-4. 통과 기준 이상 → 루프 A-2 완료
+1. 루프 A-1에서 개선사항이 남은 같은 `item_id`에 대해서만 반복한다.
+2. Agent(planner) 호출: `"[Batch{N}][R{M}][planner] revise: {요청 항목 요약}"` + "디자이너 리뷰: {경로}. 작업 보드: workspace/planning/request-workboard.md. 반영하여 기획서 수정 + `wf_*` + `desc_*` 수정해"
+3. Agent(designer) 호출: `"[Batch{N}][R{M}][designer] review: ux re-review {요청 항목 요약}"` + "기획서 + `wf_*` + `desc_*`를 재검토해. 점수 반환해"
+4. 통과 기준 미만 → 2번 반복
+5. 통과 기준 이상 → 해당 `item_id`의 루프 A-2 완료
 
 ### 루프 A-3: 디자이너 Penpot 디자인 적용
-1. Agent(designer) 호출: "기획서 + `wf_*` + `desc_*`를 참조하여 `design_*` Board를 새로 생성해. 기존 와이어프레임 Board는 수정하지 마"
+1. 루프 A-1/A-2를 통과한 각 `item_id`마다 Agent(designer) 호출: `"[Batch{N}][R{M}][designer] apply: design apply {요청 항목 요약}"` + "기획서 + `wf_*` + `desc_*`를 참조하여 `design_*` Board를 새로 생성/수정해. 기존 와이어프레임 Board는 수정하지 마"
    - designer는 반환 시 `developer_ready`, `developer_reason`, `developer_targets`를 함께 넘겨 다음 단계 구현 가능 여부를 명시한다
    - designer는 결과를 반환하기 전에 작업 보드의 각 `요청 항목`이 `design_*`에 반영되었는지 gap check를 수행하고 `request_coverage`를 함께 반환한다
    - `design_*`는 대응 `wf_*` / `desc_*` 쌍의 실제 하단 아래에 배치하고, 같은 페이지에서 x축 정렬을 맞춘다

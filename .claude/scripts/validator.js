@@ -280,6 +280,7 @@ function loadDispatchState(state = null) {
           item_id: dispatchState.item_id,
           role: dispatchState.role,
           summary: dispatchState.summary || dispatchState.item_id,
+          mode: dispatchState.mode || (dispatchState.description ? parseTaskSubject(dispatchState.description)?.mode || null : null),
           description: dispatchState.description || null,
           subagent_type: dispatchState.subagent_type || null,
           status: dispatchState.status === "open" ? "pending" : (dispatchState.status || "pending"),
@@ -306,6 +307,12 @@ function loadDispatchState(state = null) {
       item_id: entry.item_id || null,
       role: entry.role || null,
       summary: "summary" in entry ? entry.summary : entry.item_id || null,
+      mode:
+        "mode" in entry
+          ? entry.mode
+          : ("description" in entry && entry.description
+              ? parseTaskSubject(entry.description)?.mode || null
+              : null),
       description: "description" in entry ? entry.description : null,
       subagent_type: "subagent_type" in entry ? entry.subagent_type : null,
       status: entry.status || "pending",
@@ -366,12 +373,58 @@ function parseTaskSubject(subject) {
     return null;
   }
 
+  const rawSummary = (matched[4] || "").trim();
+  const role = matched[3];
+  const modeInfo = extractRoleMode(role, rawSummary);
+
   return {
     batch_id: matched[1],
     item_id: matched[2],
-    role: matched[3],
-    summary: matched[4],
+    role,
+    summary: rawSummary,
+    mode: modeInfo.mode,
+    mode_summary: modeInfo.summary,
   };
+}
+
+function extractRoleMode(role, summary) {
+  const trimmed = String(summary || "").trim();
+  if (role === "planner") {
+    const matched = /^(plan|revise):\s+(.+)$/.exec(trimmed);
+    return {
+      mode: matched ? matched[1] : null,
+      summary: matched ? matched[2].trim() : trimmed,
+    };
+  }
+
+  if (role === "designer") {
+    const matched = /^(review|apply):\s+(.+)$/.exec(trimmed);
+    return {
+      mode: matched ? matched[1] : null,
+      summary: matched ? matched[2].trim() : trimmed,
+    };
+  }
+
+  return {
+    mode: null,
+    summary: trimmed,
+  };
+}
+
+function validateRoleMode(meta) {
+  if (!meta) {
+    return null;
+  }
+
+  if (meta.role === "planner" && !meta.mode) {
+    return "Planner description must start with `plan:` or `revise:` after the role prefix.";
+  }
+
+  if (meta.role === "designer" && !meta.mode) {
+    return "Designer description must start with `review:` or `apply:` after the role prefix.";
+  }
+
+  return null;
 }
 
 function printJson(payload) {
@@ -454,6 +507,24 @@ function checkJsonArrayContains(filePath, fieldPath, expected) {
     return false;
   }
   return value.map((entry) => String(entry)).includes(String(expected));
+}
+
+function checkJsonArrayNonEmpty(filePath, fieldPath) {
+  if (!checkFileExists(filePath)) {
+    return false;
+  }
+  const target = parseJsonFile(filePath);
+  const value = getByPath(target, fieldPath);
+  return Array.isArray(value) && value.length > 0;
+}
+
+function checkJsonArrayEmpty(filePath, fieldPath) {
+  if (!checkFileExists(filePath)) {
+    return false;
+  }
+  const target = parseJsonFile(filePath);
+  const value = getByPath(target, fieldPath);
+  return Array.isArray(value) && value.length === 0;
 }
 
 function checkJsonFieldMatches(filePath, fieldPath, pattern) {
@@ -622,6 +693,46 @@ function hasOpenDispatch(dispatchState) {
   );
 }
 
+function hasIssuedTicket(roleState) {
+  return (
+    (roleState.done_ticket && roleState.done_ticket.status === "issued") ||
+    (roleState.skip_ticket && roleState.skip_ticket.status === "issued")
+  );
+}
+
+function hasDownstreamIssuedTicket(item, currentRole) {
+  const order = item.role_order || DEFAULT_ROLE_ORDER;
+  const currentIndex = order.indexOf(currentRole);
+  if (currentIndex === -1) {
+    return false;
+  }
+
+  return order
+    .slice(currentIndex + 1)
+    .map((roleName) => item.roles.find((entry) => entry.role === roleName))
+    .filter(Boolean)
+    .some((roleState) => hasIssuedTicket(roleState));
+}
+
+function resetTicketState(ticketState) {
+  ticketState.status = "none";
+  ticketState.path = null;
+  ticketState.validated_at = null;
+  ticketState.validated_by = null;
+}
+
+function reopenRoleState(roleState, reason = null) {
+  resetTicketState(roleState.done_ticket);
+  resetTicketState(roleState.skip_ticket);
+  roleState.status = "todo";
+  roleState.checklist = [];
+  roleState.claim_path = null;
+  roleState.artifacts = [];
+  roleState.missing_items = [];
+  roleState.last_error = reason;
+  roleState.last_updated_at = nowIso();
+}
+
 function findDispatchByAgentId(dispatchState, agentId) {
   if (!agentId) {
     return null;
@@ -662,6 +773,7 @@ function buildMetaFromDispatchEntry(entry) {
     item_id: entry.item_id,
     role: entry.role,
     summary: entry.summary || entry.item_id,
+    mode: entry.mode || null,
   };
 }
 
@@ -691,6 +803,7 @@ function buildDispatchEntry(payload, parsed) {
     item_id: parsed.meta.item_id,
     role: parsed.meta.role,
     summary: parsed.meta.summary,
+    mode: parsed.meta.mode || null,
     description: parsed.description,
     subagent_type: parsed.subagent_type,
     status: "pending",
@@ -1152,9 +1265,46 @@ async function handlePreToolUseAgent() {
   }
 
   const meta = parsed.meta;
+  const modeError = validateRoleMode(meta);
+  if (modeError) {
+    saveState(state);
+    if (state.gate_mode === "enforce") {
+      stderrBlock(modeError);
+    }
+    return;
+  }
+
   const context = getStateContext(state, meta);
   const retryLimit = context.item.retry_limit || 3;
   const predecessorFailures = collectPredecessorFailures(context.item, meta.role);
+  const plannerReopen = meta.role === "planner" && meta.mode === "revise";
+
+  if (plannerReopen && hasDownstreamIssuedTicket(context.item, meta.role)) {
+    saveState(state);
+    if (state.gate_mode === "enforce") {
+      stderrBlock(
+        `Planner revise blocked for ${meta.batch_id}/${meta.item_id}: downstream role already has a done/skip ticket.`
+      );
+    }
+    return;
+  }
+
+  if (plannerReopen && context.roleState.skip_ticket.status === "issued") {
+    saveState(state);
+    if (state.gate_mode === "enforce") {
+      stderrBlock(
+        `Planner revise blocked for ${meta.batch_id}/${meta.item_id}: planner skip ticket is already issued.`
+      );
+    }
+    return;
+  }
+
+  if (plannerReopen && context.roleState.skip_ticket.status !== "issued") {
+    reopenRoleState(
+      context.roleState,
+      `planner reopened by revise mode for ${meta.batch_id}/${meta.item_id}`
+    );
+  }
 
   const recoveredEntries = recoverOpenDispatches(state);
   if (recoveredEntries.length > 0) {
@@ -1180,8 +1330,9 @@ async function handlePreToolUseAgent() {
       }
 
       if (
-        context.roleState.done_ticket.status === "issued" ||
-        context.roleState.skip_ticket.status === "issued"
+        !plannerReopen &&
+        (context.roleState.done_ticket.status === "issued" ||
+          context.roleState.skip_ticket.status === "issued")
       ) {
         blockedReason = `${meta.role} already has a done/skip ticket for ${meta.batch_id}/${meta.item_id}.`;
         return;
@@ -1231,6 +1382,22 @@ async function handlePreToolUseAgent() {
 function finalizeDispatchEntry(state, dispatchEntry, payload) {
   const meta = buildMetaFromDispatchEntry(dispatchEntry);
   const context = getStateContext(state, meta);
+  if (meta.role === "designer" && dispatchEntry.mode === "review") {
+    const validatedAt = nowIso();
+    context.roleState.status = "in_progress";
+    context.roleState.last_error = null;
+    context.roleState.last_updated_at = validatedAt;
+    saveState(state);
+    return {
+      ok: true,
+      retryLimit: context.item.retry_limit || 3,
+      failures: [],
+      meta,
+      status: "completed",
+      validatedAt,
+    };
+  }
+
   const checklistDefinitions = loadChecklistDefinitions();
   const checks = checklistDefinitions.roles[meta.role] || [];
   const predecessorFailures = collectPredecessorFailures(context.item, meta.role);
@@ -1665,6 +1832,49 @@ function handleIssueSkip(args) {
   });
 }
 
+function handleEnsureStateItem(args) {
+  const [batchId, itemId, ...titleParts] = args;
+  const title = titleParts.join(" ").trim();
+  if (!batchId || !itemId) {
+    printJson({
+      ok: false,
+      error: "usage: validator.js ensure-state-item BatchN RN [title]",
+    });
+    process.exit(1);
+  }
+
+  const state = loadState();
+  const { batch, batchIndex } = ensureBatch(state, batchId);
+  const { item, itemIndex } = ensureItem(batch, itemId, title || itemId);
+  if (title) {
+    item.title = title;
+  }
+  item.role_order =
+    Array.isArray(item.role_order) && item.role_order.length > 0
+      ? item.role_order
+      : [...DEFAULT_ROLE_ORDER];
+  item.retry_limit =
+    Number.isInteger(item.retry_limit) && item.retry_limit > 0 ? item.retry_limit : 3;
+  item.roles = item.role_order.map((roleName) => {
+    const existing =
+      Array.isArray(item.roles) &&
+      item.roles.find((entry) => entry && entry.role === roleName);
+    return normalizeRoleState(existing, roleName);
+  });
+  state.current_batch_id = batchId;
+  saveState(state);
+
+  printJson({
+    ok: true,
+    batch_id: batchId,
+    item_id: itemId,
+    title: item.title,
+    batch_index: batchIndex,
+    item_index: itemIndex,
+    roles: item.role_order,
+  });
+}
+
 function handleParseSubject(subject) {
   const parsed = parseTaskSubject(subject);
   if (!parsed) {
@@ -1709,6 +1919,12 @@ function handleCheck(args) {
       break;
     case "json_array_contains":
       ok = checkJsonArrayContains(rest[0], rest[1], rest.slice(2).join(" "));
+      break;
+    case "json_array_nonempty":
+      ok = checkJsonArrayNonEmpty(rest[0], rest[1]);
+      break;
+    case "json_array_empty":
+      ok = checkJsonArrayEmpty(rest[0], rest[1]);
       break;
     case "json_field_matches":
       ok = checkJsonFieldMatches(rest[0], rest[1], rest.slice(2).join(" "));
@@ -1757,6 +1973,8 @@ function printUsage() {
       "validator.js task-completed",
       "validator.js teammate-idle",
       "validator.js parse-subject \"[Batch8][R17][tester] summary\"",
+      "validator.js parse-subject \"[Batch8][R17][planner] plan: short summary\"",
+      "validator.js parse-subject \"[Batch8][R17][designer] review: short summary\"",
       "validator.js inspect-event path/to/payload.json",
       "validator.js issue-skip Batch8 R17 designer \"No UI-visible change\"",
       "validator.js check file_exists path/to/file",
@@ -1766,8 +1984,11 @@ function printUsage() {
       "validator.js check json_field_equals path/to/file field.path expected",
       "validator.js check json_field_truthy path/to/file field.path",
       "validator.js check json_array_contains path/to/file field.path expected",
+      "validator.js check json_array_nonempty path/to/file field.path",
+      "validator.js check json_array_empty path/to/file field.path",
       "validator.js check json_field_matches path/to/file field.path '^wf_'",
-      "validator.js check mtime_after path/to/file 2026-04-16T00:00:00.000Z"
+      "validator.js check mtime_after path/to/file 2026-04-16T00:00:00.000Z",
+      "validator.js ensure-state-item Batch8 R17 \"Short title\""
     ],
     subject_pattern: SUBJECT_PATTERN.source,
   });
@@ -1809,6 +2030,9 @@ async function main() {
       return;
     case "issue-skip":
       handleIssueSkip(rest);
+      return;
+    case "ensure-state-item":
+      handleEnsureStateItem(rest);
       return;
     default:
       printUsage();

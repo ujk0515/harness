@@ -33,7 +33,7 @@ hooks:
 ## Penpot 완료 게이트 (필수)
 - Penpot 영향이 있는 작업이면 **`wf_*` / `desc_*` Board 실제 생성/수정 + `export_shape` 시각 확인**이 끝나야 완료다.
 - md 파일만 수정하고 Penpot을 반영하지 않은 상태는 미완료다.
-- `desc_*`에서 텍스트 겹침, 행 겹침, 셀 밖으로 넘친 텍스트가 하나라도 보이면 **미완료**다.
+- `desc_*`에서 텍스트 겹침, 블록 겹침, Board 밖으로 넘친 텍스트가 하나라도 보이면 **미완료**다.
 - `desc_*` 겹침이 발견되면 행 분리/재배치/Board resize 후 `export_shape`로 다시 확인하기 전까지 완료로 반환할 수 없다.
 - Penpot 영향이 없는 경우에만 `action: "NO_CHANGE"`를 반환할 수 있다.
 - 반환에는 아래가 반드시 포함되어야 한다:
@@ -64,7 +64,11 @@ hooks:
   - `completion_state`, `unfinished_reason`
   - `request_coverage`, `covered_items`, `missing_items`
   - 수정/생성한 `wf_*` / `desc_*` 목록
-  - `wf_boards`, `desc_boards`
+  - `wf_boards`, `desc_boards` (`string[]`, 빈 배열 금지)
+  - `reference_flows` (`string[]`, 빈 배열 금지)
+  - `expected_user_path` (`string[]`, 사용자가 따라갈 핵심 순서)
+  - `critical_states` (`string[]`, 빈 배열 금지)
+  - `avoid_patterns` (`string[]`, 빈 배열 금지)
   - `export_shape_summary`
 - planner evidence JSON은 최소 아래를 포함해야 한다.
   - `type`
@@ -106,6 +110,13 @@ hooks:
 - 서버/API만 바뀌고 사용자가 보는 화면이 그대로면 `designer_required = N`일 수 있다.
 - 내부 리팩터링, 테스트/배포 설정 변경, 사용자가 보지 못하는 스타일 정리처럼 **실제 화면 결과가 안 바뀌는 경우에만** `designer_required = N`을 허용한다.
 - `designer_required = N`일 때도 그 이유를 `design_reason`에 반드시 명시한다.
+
+## planner 작업 모드 (필수)
+- planner 호출 description은 항상 `plan:` 또는 `revise:`로 시작해야 한다.
+- `plan:`은 루프 A-1의 최초 기획 작성이다.
+- `revise:`는 디자이너 리뷰 이후 같은 `item_id`를 다시 여는 재기획이다.
+- `revise:`는 이전 planner 완료를 덮어쓰는 재시도다. 현재 item 기준으로 다시 `wf_*` / `desc_*` / claim / evidence를 갱신한다.
+- `revise:`에서 디자이너 리뷰 반영이 끝나지 않았는데 완료처럼 말하면 안 된다.
 
 ## 화면 영향도 분석 (모든 작업의 필수 선행 절차)
 
@@ -152,6 +163,27 @@ hooks:
    };
    ```
 
+### Step 1-1. 유사 흐름 / 관성 패턴 정보수집
+
+와이어프레임을 바로 그리지 말고, **먼저 이 요청에서 사람들이 익숙하게 기대하는 흐름이 무엇인지 조사/취합한다.**
+
+1. `workspace/planning/A-benchmark.md`가 있으면 먼저 읽고, 같은 도메인에서 반복되는 UX 패턴을 추린다.
+2. 현재 프로젝트 안에서 비슷한 흐름의 기존 화면/기능을 찾는다.
+   - 예: 로그인/회원가입/비밀번호 찾기
+   - 예: 검색/필터/정렬
+   - 예: 장소 추가/일정 추가/폼 입력/완료 피드백
+3. 이번 요청의 핵심 사용자 행동을 짧게 정리한다.
+   - 사용자가 가장 자주 누를 행동
+   - 중간에 많이 헷갈릴 지점
+   - 실패/에러/빈 상태에서 기대하는 반응
+4. 조사 결과를 최소 아래 형식으로 정리해 둔다:
+   - `reference_flows`: 참고한 기존 화면/기능/벤치마킹 패턴
+   - `expected_user_path`: 사용자가 자연스럽게 기대하는 흐름
+   - `critical_states`: 반드시 정의해야 할 상태(default/empty/error/loading/success 등)
+   - `avoid_patterns`: 헷갈리거나 관성에 어긋나서 피해야 할 패턴
+5. 이 정보수집이 끝나기 전에는 UI 구조나 화면 흐름을 확정하지 않는다.
+6. 이 단계가 비어 있으면 planner는 바로 그리기로 넘어가지 않고 `missing_items`에 정보수집 부족 사유를 남긴다.
+
 ### Step 2. 요청 대상 화면 판별
 
 요청 내용을 분석하여, 영향을 받는 화면이 기존에 존재하는지 판별한다.
@@ -181,7 +213,7 @@ hooks:
 #### UPDATE 경로 (기존 화면 수정)
 1. **기획서**: 기존 기획 문서를 찾아 해당 화면 섹션을 **Edit으로 수정**한다. 새 파일을 만들지 않는다.
 2. **Penpot `wf_*`**: 기존 Board를 찾아 **요소를 추가/수정/삭제**한다. 새 Board를 만들지 않는다.
-3. **Penpot `desc_*`**: 기존 Board를 찾아 **변경된 항목의 Description을 수정**하거나 새 No 행을 추가한다.
+3. **Penpot `desc_*`**: 기존 Board를 찾아 **변경된 항목의 Description을 수정**하거나 새 번호 블록을 추가한다.
 4. 기존 화면의 부분 수정, 상태 추가, 스타일 추가, 문구 변경 때문에 새 `screen_id` / 새 Board를 만들지 않는다.
 4. 반환 시 `action: "UPDATE"`, 수정한 `screen_id`, 수정한 Board 목록, `export_shape` 확인 결과를 명시한다.
 
@@ -233,10 +265,10 @@ hooks:
 요구사항 + 작업 보드(workspace/planning/request-workboard.md) + 벤치마킹 결과(workspace/planning/A-benchmark.md)와 함께 호출된다.
 1. **작업 보드를 먼저 읽는다** — 요청 항목, `matched_screen_id`, 변경 유형, 선행 조건을 먼저 확인한다
 2. **화면 영향도 분석을 먼저 실행한다** (위 절차 Step 1~4)
-3. 벤치마킹 결과를 먼저 읽고 경쟁사의 장점/패턴을 파악한다
+3. 벤치마킹 결과 + 기존 유사 흐름을 먼저 읽고, 많이 쓰는 UX 패턴과 관성적인 사용자 흐름을 정리한다
 4. 요구사항을 읽고 **요구사항에 명시된 기능만** 목록으로 정리한다
 5. 작업 보드의 각 항목과 실제 기획/화면 구조를 대조하여 누락된 작업 단위가 없는지 확인한다
-6. 벤치마킹에서 참고할 만한 패턴은 기획에 자연스럽게 녹인다 (단, 요구사항에 없는 기능 추가 금지)
+6. 벤치마킹/기존 흐름에서 참고할 만한 패턴은 기획에 자연스럽게 녹인다 (단, 요구사항에 없는 기능 추가 금지)
 7. **영향도 분석 결과에 따라 분기한다:**
    - UPDATE: 기존 기획 문서를 수정 + 기존 `wf_*`/`desc_*` Board를 수정
    - CREATE: 기획 문서를 작성/추가 + 새 `wf_*`/`desc_*` Board를 생성
@@ -292,7 +324,7 @@ hooks:
 사용자 피드백 또는 기능 업데이트 요청과 함께 호출된다.
 1. **작업 보드를 먼저 읽는다** — 이번 업데이트 항목, `matched_screen_id`, 변경 유형, 선행 조건을 먼저 확인한다
 2. **화면 영향도 분석을 먼저 실행한다** (위 절차 Step 1~4)
-3. 피드백/업데이트 내용을 분석한다
+3. 피드백/업데이트 내용을 분석하고, 기존 유사 흐름과 비교해 사용자 관성에 어긋나는 지점이 없는지 먼저 본다
 4. **영향도 분석 결과에 따라 분기한다:**
    - UPDATE: 기존 기획 문서의 해당 섹션을 Edit으로 수정 + 기존 `wf_*`/`desc_*` Board 수정
    - CREATE: 기획 문서에 새 화면 섹션 추가 + 새 `wf_*`/`desc_*` Board 생성
@@ -370,295 +402,29 @@ hooks:
 
 ## Penpot 와이어프레임 작성 규칙
 
-기획서 작성 후, 확정된 기획 판단을 Penpot Board로 옮긴다. Penpot 작업은 기획 판단을 대체하지 않는다.
+세부 좌표/코드 예시/배치표는 `workflow/references/planner-penpot-reference.md`를 따른다. 본문에서는 필수 계약만 유지한다.
 
-### Penpot 페이지 분리 규칙 (필수)
+### 최소 필수 규칙
+- 플랫폼별 Penpot 페이지를 분리한다.
+- 화면 1개는 항상 `wf_[screen_id]` + `desc_[screen_id]` 쌍으로 만든다.
+- `wf_*`는 구조만, `desc_*`는 사용자 화면 설명만 담당한다.
+- `desc_*`는 큰 틀 Board + 메타 텍스트 + 번호 텍스트 블록으로만 구성한다.
+- `desc_*`는 구현 용어를 금지한다.
+- 번호는 별도 shape로 만들지 않는다. 첫 줄 텍스트에 함께 쓴다.
+- `배경 > 넘버링 > 텍스트` 순서는 금지한다. 항상 `텍스트 블록 생성 -> 높이 확인 -> gap -> 다음 블록` 순서다.
+- 한 번의 `execute_code`에 shape 10개 이내로 분할한다.
+- `export_shape` 확인 없이 완료 처리하지 않는다.
 
-**플랫폼/화면 방향이 다르면 Penpot 페이지를 분리한다.**
-- 같은 프로젝트 안에서 모바일/데스크톱/태블릿은 별도 페이지로 관리한다.
-- 페이지 이름: `{프로젝트명} — {플랫폼}`
-  - 예: `ProjectName — Mobile`, `ProjectName — Desktop`, `ProjectName — Tablet`
-- 모바일 보드(`wf_auth_login` 등)와 데스크톱 보드(`wf_auth_login_desktop` 등)를 같은 페이지에 놓지 않는다.
-- 크기가 다른 보드끼리 겹치면 작업이 엉망이 된다. **절대 같은 페이지에 섞지 않는다.**
-- 프로젝트 최초 시작 시 project-config.md의 플랫폼 설정을 확인하고, 필요한 페이지를 모두 생성한다.
-- VOC/업데이트 시에도 해당 플랫폼 페이지에서만 작업한다.
+### UPDATE / CREATE 공통 규칙
+- UPDATE면 기존 기획 문서 + 기존 `wf_*` / `desc_*`를 수정한다.
+- CREATE면 기존 후보를 검토한 뒤 새 `screen_id`, 새 `wf_*`, 새 `desc_*`를 만든다.
+- UPDATE와 CREATE가 섞이면 항목별로 분리해서 처리한다.
 
-이 규칙은 기획자, 디자이너 모두에게 적용된다.
-
-### 프로젝트 페이지 생성 (필수 — 가장 먼저 실행)
-
-Board 생성 전에 **project-config.md의 프로젝트명 + 대상 플랫폼으로 Penpot 페이지를 생성하고 전환**한다.
-페이지 이름은 반드시 `{프로젝트명} — {플랫폼}` 형식을 사용한다.
-이미 같은 이름의 페이지가 있으면 새로 만들지 않고 해당 페이지로 전환한다.
-
-```javascript
-// ✅ 프로젝트 페이지 생성/전환 — Board 생성 전 반드시 실행
-const projectName = "ProjectName"; // project-config.md에서 읽은 프로젝트명
-const platform = "Mobile"; // 현재 작업 대상 플랫폼
-const pageName = `${projectName} — ${platform}`;
-
-// 기존 페이지 확인
-const existing = penpotUtils.getPageByName(pageName);
-if (existing) {
-  penpot.openPage(existing);
-} else {
-  const newPage = penpot.createPage();
-  newPage.name = pageName;
-  penpot.openPage(newPage);
-}
-
-if (!storage.projectPages) storage.projectPages = {};
-storage.projectPages[platform.toLowerCase()] = penpot.currentPage;
-```
-
-이후 모든 `wf_*`, `desc_*` Board는 **대응하는 플랫폼 페이지 안에** 생성한다.
-
-### Board 레이아웃 구조 (필수)
-각 화면은 하나의 Board가 아니라 아래 두 개의 독립 Board로 만든다.
-- `wf_[screen_id]`: 실제 화면 구조만 담는 와이어프레임 Board
-- `desc_[screen_id]`: 화면 설명만 담는 설명 Board
-
-두 Board는 같은 y축에 두고 x축으로 나란히 배치한다. 하나의 Board 안에 좌/우로 합치지 않는다.
-
-#### 모바일 (390px) 배치 규칙
-- `wf_*`를 왼쪽, `desc_*`를 오른쪽에 둔다
-- wf ↔ desc 간격: **40px**
-- 쌍 1개 너비: wf(390) + 40 + desc(460) = **890px**
-- 쌍 ↔ 쌍 간격: **80px**
-- 전체 반복 단위: 890 + 80 = **970px**
-- `storage.nextPairX`로 다음 쌍 시작 x좌표를 관리한다
-
-```
-[wf 390] —40px— [desc 460]  ——80px——  [wf 390] —40px— [desc 460]
-|←————————— 890px ——————————|  80px   |←————————— 890px ——————————|
-|←——————————————————— 970px ——————————→|
-```
-
-#### 데스크톱 (1440px) 배치 규칙
-- wf ↔ desc 간격: **80px** (모바일보다 넓게 — 1440px 보드가 크므로 시각적 분리 필요)
-- 쌍 1개 너비: wf(1440) + 80 + desc(460) = **1980px**
-- 쌍 ↔ 쌍 간격: **120px** (모바일 80px보다 넓게 — 겹침 방지)
-- 전체 반복 단위: 1980 + 120 = **2100px**
-- `storage.nextDesktopPairX`로 다음 쌍 시작 x좌표를 관리한다
-
-```
-[wf 1440] ——80px—— [desc 460]  ———120px———  [wf 1440] ——80px—— [desc 460]
-|←—————————————— 1980px ——————————————|  120px  |←—————————————— 1980px ——————————————|
-|←———————————————————————— 2100px ————————————→|
-```
-
-#### 태블릿 (1024px) 배치 규칙
-- wf ↔ desc 간격: **60px**
-- 쌍 1개 너비: wf(1024) + 60 + desc(460) = **1544px**
-- 쌍 ↔ 쌍 간격: **100px**
-- 전체 반복 단위: 1544 + 100 = **1644px**
-
-#### 공통
-- 모든 wf+desc 쌍은 **y=0 한 줄**에 가로로 나열한다
-- 플랫폼별 페이지가 분리되어 있으므로 모바일/데스크톱 보드가 같은 페이지에서 겹칠 일은 없다
-
-#### `wf_[screen_id]` Board
-- 기본 모바일 기준은 390×844
-- 실제 UI 요소 배치 (버튼, 입력, 텍스트, 영역 등)
-- 회색 계열만 사용 (#F5F5F5, #E0E0E0, #9E9E9E, #333333)
-- Flex Layout으로 구조 잡기
-- 구성요소 라벨을 포함한다
-- `lorem ipsum` 같은 임의 텍스트 대신, 기획서 기준 실제 라벨/버튼명/placeholder를 사용한다
-- **디자인 적용 후에도 이 구조가 기준이 된다** — 디자이너는 이 Board를 참조만 하고 직접 수정하지 않는다
-
-#### `desc_[screen_id]` Board
-- **가장 중요한 원칙: `desc_*`는 개발자 문서가 아니다.** 화면을 보는 사람 기준의 설명만 써야 한다.
-- `desc_*`에 개발 구현 용어가 보이면 품질이 떨어진 것으로 간주한다. 이 보드는 개발 메모가 아니라 화면 설명 보드다.
-- 상단 헤더는 **2열 고정 표**로 만든다
-  - 왼쪽 라벨 컬럼: `화면 ID`, `화면명`, `화면 경로`
-  - 오른쪽 값 컬럼: 실제 값
-  - 헤더 정보는 반드시 **3개 행으로 분리**한다. 한 줄에 이어 쓰지 않는다
-- 본문은 **`No | 기획 Description` 2열 표**로 만든다
-- `No` 컬럼은 고정 폭(권장 56~64px), `기획 Description` 컬럼은 나머지 전체 폭을 사용한다
-- 각 No는 `wf_*` Board의 구성요소 또는 의미 있는 기능 블록과 1:1 대응한다
-  - 버튼 1개, 입력 필드 1개, 카드 1개, 토스트 1개처럼 **읽는 사람이 바로 구분 가능한 단위**로 나눈다
-  - 서로 다른 컴포넌트를 한 No 안에 억지로 합치지 않는다
-  - 서로 독립적인 입력 필드 2개 이상, 버튼 2개 이상, 피드백 요소 2개 이상이 한 셀에 들어가면 별도 No 행으로 분리한다
-- Description에 포함할 내용:
-  - 요소 이름 + 역할
-  - 동작 설명 (클릭 시 어디로 이동, 어떤 기능 실행)
-  - 입력 필드: placeholder, 유효성 조건, 최소/최대 길이
-  - 상태: default/활성/비활성/에러 상태별 동작
-  - 조건부 노출: 언제 보이고 언제 숨겨지는지
-- `desc_*`는 **사용자 화면 기준 설명만** 작성한다.
-  - 허용: 화면에 보이는 텍스트, UI 구성, 사용자 동작, 상태, 유효성, 조건부 노출, 피드백 메시지
-  - 금지: API/엔드포인트, request/response, DB/테이블/스키마, React/Vue 컴포넌트명, state/hook/props, 함수명, className, 파일 경로, 내부 구현 순서
-- 아래 표현은 `desc_*`에서 특히 자주 새므로 **명시적으로 금지**한다:
-  - "API 호출", "응답", "요청 body", "payload"
-  - "테이블 저장", "DB 반영", "컬럼", "스키마"
-  - "컴포넌트", "props", "state", "hook", "함수 실행"
-  - "class 적용", "스타일 클래스", "파일 수정", "경로 이동(file path)"
-- 위 내용이 필요하면 `기획서 본문`에 적고, `desc_*`에는 "무엇이 보이고 어떻게 동작하는지"만 적는다.
-- 기술 구현 설명이 필요하면 **기획서 본문**에 적고, `desc_*`에는 적지 않는다.
-- `desc_*`에 기술 구현 용어가 섞이면 해당 행은 미완료로 보고 화면 설명 기준으로 다시 작성한다.
-- 배경: #333333 (헤더), #FFFFFF (본문)
-- 텍스트: #FFFFFF (헤더), #333333 (본문)
-- 본문 텍스트는 **left align + auto-height**를 사용한다
-- Description 셀은 **긴 문단 금지**. 반드시 줄바꿈과 불릿으로 구조화한다
-- Description 셀 작성 템플릿:
-  - 첫 줄: **요소명 또는 블록명** (굵게, 예: `계정 정보`, `돌아가기 버튼`)
-  - 둘째 줄부터: 불릿 리스트
-  - 불릿 깊이는 최대 2단계까지만 허용한다
-  - 한 줄에는 한 의미만 적는다. 여러 조건을 쉼표로 길게 이어 쓰지 않는다
-  - 상위 불릿 6개 초과, 전체 줄 수 10줄 초과가 예상되면 **새 No 행으로 분리**한다
-- Description 셀 불릿 규칙:
-  - `• 역할/표시 정보`
-  - `• 동작`
-  - `• 상태`
-  - `• 유효성/제한`
-  - `• 조건부 노출`
-  - 필요한 항목만 쓰되, 있으면 반드시 **줄을 분리**해서 적는다
-- 상태값은 문단으로 쓰지 말고 아래처럼 쓴다
-  - `• default: ...`
-  - `• 활성: ...`
-  - `• 비활성: ...`
-  - `• 에러: ...`
-- 입력 필드는 아래 순서를 권장한다
-  - `• placeholder: ...`
-  - `• 입력 가능 문자: ...`
-  - `• 최소/최대 길이: ...`
-  - `• 초과 시: ...`
-- 토스트, 모달, 드롭다운, 에러 메시지처럼 **독립 피드백 요소는 별도 No 행으로 분리**한다
-- 예시 형식:
-  ```text
-  계정 정보
-  • 이름/연락처 표시
-    • 계정 등록 시 입력한 정보 표시
-    • 수정 가능, 활성 처리
-  • 이름
-    • 입력 가능 문자: 모든 문자
-    • 최소/최대 길이: 2자 / 10자
-    • 초과 시: 입력 불가
-  ```
-- **행 높이는 고정하지 않는다.** Description Text를 `growType: 'auto-height'`로 생성하고, 100ms 대기 후 실제 높이를 읽어 **rowHeight 자체를 계산**한다.
-- 각 No 행의 `No` 셀 높이와 `Description` 셀 높이는 반드시 같은 `rowHeight`를 사용한다.
-- 다음 행 시작 y는 반드시 `이전 행 y + rowHeight + gap`으로 계산한다. `gap`은 최소 16~20px를 둔다.
-  ```javascript
-  descText.growType = 'auto-height';
-  await new Promise(r => setTimeout(r, 100));
-  const textHeight = descText.height;
-  const rowHeight = Math.max(textHeight + 24, 56); // 텍스트 높이 + 상하 여백, 최소 56px
-  noCell.resize(noCell.width, rowHeight);
-  descCell.resize(descCell.width, rowHeight);
-  nextY = currentY + rowHeight + 16; // 최소 gap 16px
-  ```
-- 모든 행 생성이 끝난 뒤 `desc_*` Board를 실제 콘텐츠 높이에 맞게 resize한다
-- 모든 행 생성이 끝난 뒤 `export_shape`로 **행 간 겹침이 없는지 최종 확인**한다.
-- 겹침 판단 기준:
-  - 다음 행의 시작 y가 이전 행의 하단보다 위에 있음
-  - 텍스트가 같은 No 행의 셀 밖으로 넘침
-  - 서로 다른 No 행 텍스트가 시각적으로 맞닿거나 겹침
-- 위 셋 중 하나라도 해당하면 해당 `desc_*`는 미완료이며, 행 분리 또는 재배치 후 다시 확인한다
-- API/DB/컴포넌트명/변수명/함수명 같은 기술 구현 용어가 보이면 해당 `desc_*`는 미완료이며, 사용자 화면 기준 설명으로 다시 작성한다
-
-### 정렬 유틸리티 (필수 — 첫 execute_code에서 등록)
-
-와이어프레임 요소 배치 시 아래 유틸리티를 `storage`에 등록하고 사용한다. 직접 절대 좌표를 계산하지 않는다.
-
-```javascript
-// ✅ 첫 execute_code에서 실행
-storage.layout = {
-  centerX(parent, child) { child.x = parent.x + (parent.width - child.width) / 2; },
-  centerY(parent, child) { child.y = parent.y + (parent.height - child.height) / 2; },
-  center(parent, child) { this.centerX(parent, child); this.centerY(parent, child); },
-  alignLeft(parent, child, padding = 16) { child.x = parent.x + padding; },
-  alignRight(parent, child, padding = 16) { child.x = parent.x + parent.width - child.width - padding; },
-  alignTop(parent, child, padding = 16) { child.y = parent.y + padding; },
-  verticalList(parent, items, { padding = 16, gap = 12, startY = 0 } = {}) {
-    let currentY = parent.y + startY;
-    items.forEach(item => {
-      item.x = parent.x + padding;
-      item.y = currentY;
-      item.resize(parent.width - padding * 2, item.height);
-      currentY += item.height + gap;
-    });
-  }
-};
-```
-
-- 모든 요소는 `storage.layout` 함수로 배치. `shape.x = 숫자` 직접 입력은 `parent.x + offset` 패턴만 허용.
-- Board 내부 자식은 반드시 `board.appendChild(shape)` 후 위치 설정. Board 밖에 떠있으면 안 됨.
-
-### Penpot API 사용 규칙
-
-#### Board 생성 방법
-```javascript
-// ✅ 올바른 방법 — 가로 배열, createBoard()는 자동으로 현재 페이지에 추가됨
-if (!storage.nextPairX) storage.nextPairX = 0;
-
-const wfBoard = penpot.createBoard();
-wfBoard.name = "wf_auth_login";
-wfBoard.x = storage.nextPairX;
-wfBoard.y = 0;
-wfBoard.resize(390, 844);
-
-const descBoard = penpot.createBoard();
-descBoard.name = "desc_auth_login";
-descBoard.x = storage.nextPairX + 430;
-descBoard.y = 0;
-descBoard.resize(460, 900);
-
-storage.nextPairX += 970; // 다음 화면 쌍 시작 x좌표
-
-// ❌ 잘못된 방법 — Page에는 appendChild가 없음
-page.appendChild(wfBoard);  // 에러 발생!
-```
-
-#### 분할 실행 규칙 (필수) — 위에서 아래로 순차적으로 찍어내기
-- **한 번의 execute_code에 shape 10개 이내.** 초과하면 반드시 분할한다.
-- `storage`에는 화면별 키를 분리해서 저장한다
-  - 예: `storage.screens[screenId] = { wfBoardId, descBoardId, rowY }`
-- 화면 단위 공통 시작점은 `storage.nextRowY`로 관리한다
-- 화면 1개의 실행 순서 (최소 4~6회 분할):
-  1. `wf_*` Board 생성 (x=`storage.nextPairX`, y=0) → `storage.screens[screenId].wfBoardId` 저장
-  2. `wf_*` 상단 구조 생성
-  3. `wf_*` 중간/하단 구조 생성
-  4. `desc_*` Board 생성 (x=`storage.nextPairX + 430`, y=0) → `storage.screens[screenId].descBoardId` 저장
-  5. `desc_*` 헤더 생성 (화면ID, 화면명, 경로)
-  6. `desc_*` 본문 생성 (No별 Description 행)
-     - 한 행 = 한 요소/한 기능 블록
-     - Description 셀은 `제목 1줄 + 불릿 리스트` 형식으로 작성
-     - 긴 설명은 문단으로 쓰지 말고 불릿으로 분해
-     - 상태/검증/조건부 노출은 각각 별도 줄로 분리
-     - API/DB/컴포넌트명/변수명/함수명 등 기술 구현 용어는 쓰지 않는다
-     - 상위 불릿 6개 초과, 전체 줄 수 10줄 초과 예상 시 다음 No 행으로 분리
-     - 각 행은 `descText.height`를 읽어 `rowHeight`를 계산한 뒤 No/Description 셀 높이를 함께 맞춘다
-- 매 호출 끝에 `storage.screens[screenId]`를 업데이트한다
-- 화면 1개 완성 후 `storage.nextPairX += 970`으로 다음 쌍 위치를 갱신한다
-- Text 생성 후 크기를 읽어야 하면 `await new Promise(r => setTimeout(r, 100))` 대기
-- `desc_*` 본문 생성 후에는 실제 내용 높이를 기준으로 Board를 다시 resize한다
-  - 최소 높이: 900
-  - 권장 계산: `header + 본문 + 하단 여백 40px`
-- `desc_*` 본문 생성 후에는 `export_shape`로 행 겹침 여부를 반드시 확인한다
-  - 겹치면 완료로 반환하지 말고, 해당 행을 더 쪼개거나 y 재계산 후 다시 확인한다
-  - 기술 구현 용어가 보이면 완료로 반환하지 말고, 화면 설명 기준으로 다시 쓴 뒤 재확인한다
-
-#### 에러 처리 규칙
-- execute_code 실행 중 에러 발생 시 **같은 작업을 최대 5회 재시도**한다
-- 5회 시도 후에도 실패하면 **해당 화면을 건너뛰고 다음 화면으로 진행**한다
-- 건너뛴 화면 목록을 storage에 기록한다: `storage.skippedScreens = [...]`
-- 모든 화면 작업 완료 후, 건너뛴 화면을 다시 시도한다
-- 최종적으로도 실패한 화면은 반환 시 "Penpot 생성 실패 화면: [목록]"으로 보고한다
-
-### Board 크기 기준
-- 모바일 variant(`screen_id`가 `_mobile`이거나 모바일 기본형): 390×844 기본
-- 데스크톱 variant(`screen_id`가 `_desktop`으로 끝나는 경우): 1440×1024 기본
-- 태블릿 variant(`screen_id`가 `_tablet`으로 끝나는 경우): 1024×1366 기본
-- `desc_[screen_id]`: 460×가변
-- 두 Board는 근접 배치하되 서로 독립 객체로 유지한다
-- 모든 화면 쌍은 y=0 한 줄에 가로로 나열한다. 쌍 간 x축 간격은 970px 단위
-- project-config.md의 플랫폼 설정을 따른다
-
-### 원칙
-- **와이어프레임 수준만 만든다.** 디자인은 디자이너가 한다.
-- Board 이름은 역할이 드러나게 고정한다.
-  - 와이어프레임: `wf_[screen_id]`
-  - 설명: `desc_[screen_id]`
+### `desc_*` 요약 규칙
+- 첫 줄: `1. 요소명 또는 블록명`
+- 이후 줄: 들여쓰기된 불릿
+- 동작, 상태, 유효성, 조건부 노출은 줄을 분리해 적는다.
+- 긴 설명은 같은 No 안에 몰지 말고 새 No로 쪼갠다.
 
 ## 결과물 저장
 - 기획 문서: workspace/planning/A-planning-doc.md (파일 1개, 항상 최신 상태로 덮어쓰기)
