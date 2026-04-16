@@ -13,14 +13,59 @@
         "command": "node .claude/scripts/validator.js check json_array_contains workspace/claims/{batch_id}/{item_id}/planner.claim.json covered_items {item_id}"
       },
       {
+        "id": "planner_claim_has_wf_boards",
+        "label": "planner claim 안의 wf_boards 존재",
+        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/planner.claim.json wf_boards"
+      },
+      {
+        "id": "planner_claim_has_desc_boards",
+        "label": "planner claim 안의 desc_boards 존재",
+        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/planner.claim.json desc_boards"
+      },
+      {
+        "id": "planner_claim_has_export_shape_summary",
+        "label": "planner claim 안의 export_shape_summary 존재",
+        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/planner.claim.json export_shape_summary"
+      },
+      {
         "id": "planner_wf_export_recent",
         "label": "planner wf-export evidence가 현재 시도 이후 갱신됨",
         "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json {dispatch_created_at}"
       },
       {
+        "id": "planner_wf_export_type",
+        "label": "planner wf-export evidence의 type = wf_export",
+        "command": "node .claude/scripts/validator.js check json_field_equals workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json type wf_export"
+      },
+      {
+        "id": "planner_wf_export_board_id",
+        "label": "planner wf-export evidence의 board_id 존재",
+        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json board_id"
+      },
+      {
+        "id": "planner_wf_export_board_name",
+        "label": "planner wf-export evidence의 board_name이 wf_로 시작",
+        "command": "node .claude/scripts/validator.js check json_field_matches workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json board_name ^wf_"
+      },
+      {
         "id": "planner_desc_export_recent",
         "label": "planner desc-export evidence가 현재 시도 이후 갱신됨",
         "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json {dispatch_created_at}"
+      },
+      {
+        "id": "planner_desc_export_type",
+        "label": "planner desc-export evidence의 type = desc_export",
+        "command": "node .claude/scripts/validator.js check json_field_equals workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json type desc_export"
+      },
+      {
+        "id": "planner_desc_export_board_id",
+        "label": "planner desc-export evidence의 board_id 존재",
+        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json board_id"
+      },
+      {
+        "id": "planner_desc_export_board_name",
+        "label": "planner desc-export evidence의 board_name이 desc_로 시작",
+        "command": "node .claude/scripts/validator.js check json_field_matches workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json board_name ^desc_"
       },
       {
         "id": "planner_state_done",

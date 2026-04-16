@@ -456,6 +456,20 @@ function checkJsonArrayContains(filePath, fieldPath, expected) {
   return value.map((entry) => String(entry)).includes(String(expected));
 }
 
+function checkJsonFieldMatches(filePath, fieldPath, pattern) {
+  if (!checkFileExists(filePath)) {
+    return false;
+  }
+  const target = parseJsonFile(filePath);
+  const value = getByPath(target, fieldPath);
+  if (value == null) {
+    return false;
+  }
+
+  const regex = new RegExp(pattern);
+  return regex.test(String(value));
+}
+
 function checkMtimeAfter(filePath, isoString) {
   if (!checkFileExists(filePath)) {
     return false;
@@ -1696,6 +1710,9 @@ function handleCheck(args) {
     case "json_array_contains":
       ok = checkJsonArrayContains(rest[0], rest[1], rest.slice(2).join(" "));
       break;
+    case "json_field_matches":
+      ok = checkJsonFieldMatches(rest[0], rest[1], rest.slice(2).join(" "));
+      break;
     case "mtime_after":
       ok = checkMtimeAfter(rest[0], rest[1]);
       break;
@@ -1749,6 +1766,7 @@ function printUsage() {
       "validator.js check json_field_equals path/to/file field.path expected",
       "validator.js check json_field_truthy path/to/file field.path",
       "validator.js check json_array_contains path/to/file field.path expected",
+      "validator.js check json_field_matches path/to/file field.path '^wf_'",
       "validator.js check mtime_after path/to/file 2026-04-16T00:00:00.000Z"
     ],
     subject_pattern: SUBJECT_PATTERN.source,

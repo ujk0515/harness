@@ -64,9 +64,17 @@ hooks:
   - `completion_state`, `unfinished_reason`
   - `request_coverage`, `covered_items`, `missing_items`
   - 수정/생성한 `wf_*` / `desc_*` 목록
-  - `export_shape` 확인 결과 요약
+  - `wf_boards`, `desc_boards`
+  - `export_shape_summary`
+- planner evidence JSON은 최소 아래를 포함해야 한다.
+  - `type`
+  - `screen_id`
+  - `board_name`
+  - `board_id`
+  - `exported_at`
 - planner는 `done ticket`을 직접 만들지 않는다. validator가 체크리스트를 검사해 `planner.done.json`을 발급한다.
 - claim과 evidence는 **이번 시도에서 새로 갱신된 파일**이어야 한다. 이전 시도의 남은 파일은 통과로 인정되지 않는다.
+- `wf-export.json` / `desc-export.json`에 `board_id`와 `board_name`이 없으면, 실제 Penpot export 근거가 없는 것으로 보고 완료로 인정하지 않는다.
 - `planner_status = done`은 claim/evidence를 남기고 자가 점검을 통과한 경우에만 사용한다.
 
 ## 자가 점검 관문 (필수)

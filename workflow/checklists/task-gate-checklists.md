@@ -1,7 +1,7 @@
 # Task Gate Checklists
 
 이 문서는 validator가 역할별 `done ticket`을 발급할 때 어떤 **기계 검증 항목**을 통과해야 하는지 정리한다.
-정본은 [task-gate-checklists.json](/Users/yoojaekwon/Desktop/develop/TripLog/workflow/checklists/task-gate-checklists.json:1)이고, 이 문서는 사람이 읽는 설명본이다.
+정본은 [task-gate-checklists.json](/Users/yoojaekwon/Desktop/develop/harness/workflow/checklists/task-gate-checklists.json:1)이고, 이 문서는 사람이 읽는 설명본이다.
 
 ## 현재 게이트 방식
 
@@ -32,8 +32,11 @@
 
 - `workspace/claims/{batch_id}/{item_id}/planner.claim.json`가 현재 시도 이후 갱신
 - claim의 `covered_items`에 현재 `item_id` 포함
+- claim 안의 `wf_boards`, `desc_boards`, `export_shape_summary` 존재
 - `workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json`가 현재 시도 이후 갱신
+- `wf-export.json` 안의 `type = wf_export`, `board_id` 존재, `board_name`이 `wf_`로 시작
 - `workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json`가 현재 시도 이후 갱신
+- `desc-export.json` 안의 `type = desc_export`, `board_id` 존재, `board_name`이 `desc_`로 시작
 - `request-state.json`의 planner status가 `done`
 
 ### Designer
