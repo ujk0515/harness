@@ -750,6 +750,69 @@ function hasTranscriptTouchAfter(transcriptPath, beforePath, afterPath) {
   return afterIndices.some((afterIndex) => beforeIndices.some((beforeIndex) => afterIndex > beforeIndex));
 }
 
+function getTranscriptExecuteCodeBlocks(transcriptPath) {
+  return readTranscriptToolUses(transcriptPath)
+    .filter(
+      (toolUse) =>
+        typeof toolUse.name === "string" &&
+        toolUse.name.includes("execute_code") &&
+        toolUse.input &&
+        typeof toolUse.input.code === "string"
+    )
+    .map((toolUse) => toolUse.input.code);
+}
+
+function hasTranscriptWfDescRemoval(transcriptPath) {
+  const dangerPatterns = [
+    /\.remove\s*\(/,
+    /removeShape\s*\(/,
+    /deleteShape\s*\(/,
+    /\.children\s*=\s*\[/,
+    /\.children\.splice\s*\(/,
+    /\.children\s*=\s*.*\.filter\s*\(/s,
+  ];
+
+  return getTranscriptExecuteCodeBlocks(transcriptPath).some((code) => {
+    if (!/(wf_|desc_)/.test(code)) {
+      return false;
+    }
+
+    return dangerPatterns.some((pattern) => pattern.test(code));
+  });
+}
+
+function checkTranscriptNoWfDescRemoval(transcriptPath) {
+  return !hasTranscriptWfDescRemoval(transcriptPath);
+}
+
+function checkSnapshotPreservesIds(beforePath, afterPath) {
+  const beforeFullPath = resolvePath(beforePath);
+  const afterFullPath = resolvePath(afterPath);
+
+  if (!fs.existsSync(beforeFullPath) || !fs.existsSync(afterFullPath)) {
+    return false;
+  }
+
+  const beforePayload = parseJsonFile(beforePath);
+  const afterPayload = parseJsonFile(afterPath);
+  const beforeItems = Array.isArray(beforePayload) ? beforePayload : [];
+  const afterItems = Array.isArray(afterPayload) ? afterPayload : [];
+  const beforeIds = beforeItems
+    .map((entry) => (entry && typeof entry.id === "string" ? entry.id : null))
+    .filter(Boolean);
+  const afterIds = new Set(
+    afterItems
+      .map((entry) => (entry && typeof entry.id === "string" ? entry.id : null))
+      .filter(Boolean)
+  );
+
+  if (beforeIds.length === 0) {
+    return true;
+  }
+
+  return beforeIds.every((id) => afterIds.has(id));
+}
+
 function loadChecklistDefinitions() {
   return parseJsonFile("workflow/checklists/task-gate-checklists.json");
 }
@@ -1136,7 +1199,9 @@ function substituteCommand(template, context) {
 }
 
 function runChecklist(state, context, checklistEntries) {
-  return checklistEntries.map((entry) => {
+  return checklistEntries
+    .filter((entry) => !entry.when_mode || entry.when_mode === context.mode)
+    .map((entry) => {
     const command = substituteCommand(entry.command, context);
     const result = spawnSync(command, {
       cwd: resolveProjectRoot(),
@@ -1153,7 +1218,7 @@ function runChecklist(state, context, checklistEntries) {
       stdout: (result.stdout || "").trim(),
       stderr: (result.stderr || "").trim(),
     };
-  });
+    });
 }
 
 function writeTicket(state, meta, ticketKind, payload) {
@@ -1345,6 +1410,7 @@ async function handleTaskCompleted() {
     batch_id: meta.batch_id,
     item_id: meta.item_id,
     role: meta.role,
+    mode: dispatchEntry.mode || "",
     batch_index: context.batchIndex,
     item_index: context.itemIndex,
     role_index: context.roleIndex,
@@ -2415,6 +2481,12 @@ function handleCheck(args) {
       break;
     case "transcript_touch_after":
       ok = hasTranscriptTouchAfter(rest[0], rest[1], rest[2]);
+      break;
+    case "transcript_no_wf_desc_removal":
+      ok = checkTranscriptNoWfDescRemoval(rest[0]);
+      break;
+    case "snapshot_preserves_ids":
+      ok = checkSnapshotPreservesIds(rest[0], rest[1]);
       break;
     default:
       printJson({

@@ -38,6 +38,30 @@
         "command": "node .claude/scripts/validator.js check transcript_touch {agent_transcript_path} workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json"
       },
       {
+        "id": "planner_process_no_wf_desc_removal",
+        "label": "planner revise transcript에 wf_/desc_* 삭제/재할당 호출 없음",
+        "when_mode": "revise",
+        "command": "node .claude/scripts/validator.js check transcript_no_wf_desc_removal {agent_transcript_path}"
+      },
+      {
+        "id": "planner_snapshot_before_exists",
+        "label": "planner revise 시작 전 wf/desc snapshot-before evidence가 현재 시도 이후 갱신됨",
+        "when_mode": "revise",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/planner/{batch_id}/{item_id}/wf-desc-snapshot-before.json {dispatch_created_at}"
+      },
+      {
+        "id": "planner_snapshot_after_exists",
+        "label": "planner revise 종료 후 wf/desc snapshot-after evidence가 현재 시도 이후 갱신됨",
+        "when_mode": "revise",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/planner/{batch_id}/{item_id}/wf-desc-snapshot-after.json {dispatch_created_at}"
+      },
+      {
+        "id": "planner_snapshot_preserves_wf_desc",
+        "label": "planner revise 전후 snapshot 비교 시 기존 wf_/desc_* Board id가 유지됨",
+        "when_mode": "revise",
+        "command": "node .claude/scripts/validator.js check snapshot_preserves_ids workspace/evidence/planner/{batch_id}/{item_id}/wf-desc-snapshot-before.json workspace/evidence/planner/{batch_id}/{item_id}/wf-desc-snapshot-after.json"
+      },
+      {
         "id": "planner_claim_recent",
         "label": "planner claim 파일이 현재 시도 이후 갱신됨",
         "command": "node .claude/scripts/validator.js check mtime_after workspace/claims/{batch_id}/{item_id}/planner.claim.json {dispatch_created_at}"
@@ -153,6 +177,30 @@
         "id": "designer_process_claim_after_export",
         "label": "designer transcript에서 claim Write가 design-export 이후에 실행됨",
         "command": "node .claude/scripts/validator.js check transcript_touch_after {agent_transcript_path} workspace/evidence/designer/{batch_id}/{item_id}/design-export.json workspace/claims/{batch_id}/{item_id}/designer.claim.json"
+      },
+      {
+        "id": "designer_process_no_wf_desc_removal",
+        "label": "designer apply transcript에 wf_/desc_* 삭제/재할당 호출 없음",
+        "when_mode": "apply",
+        "command": "node .claude/scripts/validator.js check transcript_no_wf_desc_removal {agent_transcript_path}"
+      },
+      {
+        "id": "designer_snapshot_before_exists",
+        "label": "designer apply 시작 전 wf/desc snapshot-before evidence가 현재 시도 이후 갱신됨",
+        "when_mode": "apply",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/designer/{batch_id}/{item_id}/wf-desc-snapshot-before.json {dispatch_created_at}"
+      },
+      {
+        "id": "designer_snapshot_after_exists",
+        "label": "designer apply 종료 후 wf/desc snapshot-after evidence가 현재 시도 이후 갱신됨",
+        "when_mode": "apply",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/designer/{batch_id}/{item_id}/wf-desc-snapshot-after.json {dispatch_created_at}"
+      },
+      {
+        "id": "designer_snapshot_preserves_wf_desc",
+        "label": "designer apply 전후 snapshot 비교 시 기존 wf_/desc_* Board id가 유지됨",
+        "when_mode": "apply",
+        "command": "node .claude/scripts/validator.js check snapshot_preserves_ids workspace/evidence/designer/{batch_id}/{item_id}/wf-desc-snapshot-before.json workspace/evidence/designer/{batch_id}/{item_id}/wf-desc-snapshot-after.json"
       },
       {
         "id": "designer_claim_recent",

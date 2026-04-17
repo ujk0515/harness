@@ -55,6 +55,10 @@
 - y좌표는 `max(wf.bottom, desc.bottom) + 120`.
 - `placeholder` 대신 실제 예시 데이터를 쓴다.
 - 상태/오버레이/인터랙션은 기획에 명시된 범위만 만든다.
+- `wf_*` / `desc_*`는 읽기 전용이다.
+- `findShape`로 찾아 좌표/크기/구조를 읽는 것까지만 허용한다.
+- `.remove()`, `removeShape(...)`, `deleteShape(...)`, `children 재할당/splice/filter 재구성`은 금지한다.
+- 작업 시작 전/종료 후 `wf_*` / `desc_*` Board snapshot을 evidence로 남겨 기존 Board id가 유지되는지 확인한다.
 
 ## update/create 분기
 - 기존 대응 `design_*`가 있으면 UPDATE 우선.

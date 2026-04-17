@@ -63,6 +63,15 @@ hooks:
 - md 파일만 수정하고 Penpot을 반영하지 않은 상태는 미완료다.
 - `desc_*`에서 텍스트 겹침, 블록 겹침, Board 밖으로 넘친 텍스트가 하나라도 보이면 **미완료**다.
 - `desc_*` 겹침이 발견되면 행 분리/재배치/Board resize 후 `export_shape`로 다시 확인하기 전까지 완료로 반환할 수 없다.
+- `wf_*` / `desc_*` Board와 그 내부 요소는 삭제 금지다.
+- 아래 호출/패턴을 절대 사용하지 않는다:
+  - `.remove()`
+  - `removeShape(...)`
+  - `deleteShape(...)`
+  - `parent.children = [...]`
+  - `*.children.splice(...)`
+  - `children = children.filter(...)` 식 재할당
+- `revise:`에서 기존 `wf_*` / `desc_*` 수정은 **in-place만 허용**한다. 삭제 후 재생성 방식은 금지다.
 - Penpot 영향이 없는 경우에만 `action: "NO_CHANGE"`를 반환할 수 있다.
 - 반환에는 아래가 반드시 포함되어야 한다:
   - `action`: `CREATE` | `UPDATE` | `UPDATE+CREATE` | `NO_CHANGE`
@@ -104,6 +113,10 @@ hooks:
   - `board_name`
   - `board_id`
   - `exported_at`
+- `revise:`에서는 추가로 아래 snapshot evidence를 남긴다.
+  - `workspace/evidence/planner/{batch_id}/{item_id}/wf-desc-snapshot-before.json`
+  - `workspace/evidence/planner/{batch_id}/{item_id}/wf-desc-snapshot-after.json`
+  - 형식: `[{ id, name, type }]`
 - planner는 `done ticket`을 직접 만들지 않는다. validator가 체크리스트를 검사해 `planner.done.json`을 발급한다.
 - claim과 evidence는 **이번 시도에서 새로 갱신된 파일**이어야 한다. 이전 시도의 남은 파일은 통과로 인정되지 않는다.
 - `wf-export.json` / `desc-export.json`에 `board_id`와 `board_name`이 없으면, 실제 Penpot export 근거가 없는 것으로 보고 완료로 인정하지 않는다.

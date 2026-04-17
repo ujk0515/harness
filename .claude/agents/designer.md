@@ -50,6 +50,15 @@ hooks:
 - `design_*` 영향이 있는 작업이면 **실제 `design_*` Board 생성/수정 + `export_shape` 시각 확인**이 끝나야 완료다.
 - 로컬 문서만 남기고 `design_*`를 수정하지 않은 상태는 미완료다.
 - `design_*`가 대응하는 `wf_*` / `desc_*` 쌍의 실제 하단보다 위에 있거나, 서로 겹치거나, 다른 플랫폼 페이지에 있으면 미완료다.
+- `wf_*` / `desc_*`는 디자이너에게 **참조 전용(Read only)** 이다.
+- `wf_*` / `desc_*` Board와 그 내부 요소에 대해 아래 호출/패턴을 절대 사용하지 않는다:
+  - `.remove()`
+  - `removeShape(...)`
+  - `deleteShape(...)`
+  - `parent.children = [...]`
+  - `*.children.splice(...)`
+  - `children = children.filter(...)` 식 재할당
+- `wf_*` / `desc_*`는 `findShape`로 찾고, 좌표/크기/내부 요소를 읽는 것까지만 허용한다. 어떤 형태든 상태 변경은 금지다.
 - 디자인 영향이 없는 경우에만 `action: "NO_CHANGE"`를 반환할 수 있다.
 - 반환에는 아래가 반드시 포함되어야 한다:
   - `action`: `UPDATE` | `CREATE` | `UPDATE+CREATE` | `NO_CHANGE`
@@ -96,6 +105,10 @@ hooks:
     - `exported_at`
   - `workspace/evidence/designer/{batch_id}/{item_id}/boards.json`
     - `design_boards` (`array`, 빈 배열 금지)
+  - `apply:`에서는 추가로 아래 snapshot evidence를 남긴다.
+    - `workspace/evidence/designer/{batch_id}/{item_id}/wf-desc-snapshot-before.json`
+    - `workspace/evidence/designer/{batch_id}/{item_id}/wf-desc-snapshot-after.json`
+    - 형식: `[{ id, name, type }]`
 - designer는 `done ticket`을 직접 만들지 않는다. validator가 체크리스트를 검사해 `designer.done.json`을 발급한다.
 - claim과 evidence는 **이번 시도에서 새로 갱신된 파일**이어야 한다. 이전 시도의 남은 파일은 통과로 인정되지 않는다.
 - `designer_status = done`은 claim/evidence를 남기고 자가 점검을 통과한 경우에만 사용한다.

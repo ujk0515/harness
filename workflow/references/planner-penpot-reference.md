@@ -20,6 +20,10 @@
 - 회색 계열만 사용한다.
 - 실제 라벨/버튼명/placeholder를 쓴다.
 - 나중에 디자이너가 그대로 참조할 수 있어야 한다.
+- 기존 `wf_*` / `desc_*` 수정은 항상 in-place만 한다.
+- 삭제 후 재생성 금지.
+- 텍스트 변경은 `characters`, 위치/크기는 `.x`, `.y`, `.resize()`처럼 필요한 속성만 수정한다.
+- `.remove()`, `removeShape(...)`, `deleteShape(...)`, `children 재할당/splice/filter 재구성`은 금지한다.
 
 ## `desc_*` 원칙
 - 개발 메모가 아니라 사용자 화면 설명 보드다.
@@ -84,6 +88,7 @@ const nextY = descText.y + measuredHeight + 16;
   - Board 밖으로 넘친 텍스트
   - 번호 블록끼리 맞닿거나 겹침
   - 구현 용어가 `desc_*`에 노출됨
+- `revise:`에서는 작업 시작 전/종료 후 `wf_*` / `desc_*` Board snapshot을 evidence로 남겨 기존 Board id가 유지되는지 확인한다.
 
 ## 반환 전 필수 evidence
 - `planner.claim.json`

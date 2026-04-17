@@ -5,7 +5,9 @@
       "mcp__penpot__high_level_overview",
       "mcp__penpot__import_image",
       "mcp__penpot__penpot_api_info",
-      "mcp__penpot__export_shape"
+      "mcp__penpot__export_shape",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 *)"
     ]
   }
 }

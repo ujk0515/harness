@@ -37,6 +37,9 @@
 - transcript에서 planner claim 쓰기 호출이 planning doc 쓰기 이후에 존재
 - transcript에 `workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json` 쓰기 호출 존재
 - transcript에 `workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json` 쓰기 호출 존재
+- `revise:` 모드에서는 transcript 안에 `wf_*` / `desc_*` 삭제/재할당 호출이 없어야 함
+- `revise:` 모드에서는 `wf-desc-snapshot-before.json` / `wf-desc-snapshot-after.json` evidence가 현재 시도 이후 갱신되어야 함
+- `revise:` 모드에서는 before snapshot의 모든 `wf_*` / `desc_*` Board id가 after에도 남아 있어야 함
 - `workspace/claims/{batch_id}/{item_id}/planner.claim.json`가 현재 시도 이후 갱신
 - claim의 `covered_items`에 현재 `item_id` 포함
 - claim 안의 `wf_boards`, `desc_boards`가 비어 있지 않음
@@ -55,6 +58,9 @@
 - transcript에 `workspace/evidence/designer/{batch_id}/{item_id}/design-export.json` 쓰기 호출 존재
 - transcript에 `workspace/evidence/designer/{batch_id}/{item_id}/boards.json` 쓰기 호출 존재
 - transcript에서 designer claim 쓰기 호출이 design-export 쓰기 이후에 존재
+- `apply:` 모드에서는 transcript 안에 `wf_*` / `desc_*` 삭제/재할당 호출이 없어야 함
+- `apply:` 모드에서는 `wf-desc-snapshot-before.json` / `wf-desc-snapshot-after.json` evidence가 현재 시도 이후 갱신되어야 함
+- `apply:` 모드에서는 before snapshot의 모든 `wf_*` / `desc_*` Board id가 after에도 남아 있어야 함
 - `workspace/claims/{batch_id}/{item_id}/designer.claim.json`가 현재 시도 이후 갱신
 - claim의 `covered_items`에 현재 `item_id` 포함
 - claim의 `developer_ready = Y`
