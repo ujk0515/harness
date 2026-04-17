@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const { spawnSync } = require("child_process");
 
 const SUBJECT_PATTERN =
@@ -14,10 +15,11 @@ const DEFAULT_ROLE_ORDER = [
   "tester",
   "secretary",
 ];
-const STATE_SCHEMA_VERSION = "1.3.0-draft";
+const STATE_SCHEMA_VERSION = "1.4.0-draft";
 const DISPATCH_SCHEMA_VERSION = "1.0.0-draft";
 const DISPATCH_TERMINAL_STATUSES = new Set(["completed", "blocked", "rejected"]);
 const STALE_PENDING_WITHOUT_AGENT_MS = 30 * 1000;
+const STALE_CLAIMED_WITHOUT_STOP_MS = 3 * 1000;
 
 function readStdin() {
   return new Promise((resolve, reject) => {
@@ -186,6 +188,8 @@ function normalizeRoleState(roleState, roleName) {
       : base.predecessor_roles,
     artifacts: Array.isArray(next.artifacts) ? next.artifacts : [],
     missing_items: Array.isArray(next.missing_items) ? next.missing_items : [],
+    failed_check_ids: Array.isArray(next.failed_check_ids) ? next.failed_check_ids : [],
+    retry_scope: Array.isArray(next.retry_scope) ? next.retry_scope : [],
     last_error: "last_error" in next ? next.last_error : null,
     last_updated_at: next.last_updated_at || nowIso(),
   };
@@ -601,6 +605,151 @@ function checkMtimeAfter(filePath, isoString) {
   return stat.mtimeMs > Date.parse(isoString);
 }
 
+function buildClaudeProjectSlug() {
+  return resolveProjectRoot().replace(/\//g, "-");
+}
+
+function inferAgentTranscriptPath(sessionId, agentId) {
+  if (!sessionId || !agentId) {
+    return null;
+  }
+
+  return path.join(
+    os.homedir(),
+    ".claude",
+    "projects",
+    buildClaudeProjectSlug(),
+    String(sessionId),
+    "subagents",
+    `agent-${agentId}.jsonl`
+  );
+}
+
+function normalizeComparablePath(filePath) {
+  if (!filePath || typeof filePath !== "string") {
+    return null;
+  }
+
+  return path.resolve(path.isAbsolute(filePath) ? filePath : resolvePath(filePath));
+}
+
+function readTranscriptToolUses(transcriptPath) {
+  const fullPath = normalizeComparablePath(transcriptPath);
+  if (!fullPath || !fs.existsSync(fullPath)) {
+    return [];
+  }
+
+  const results = [];
+  let index = 0;
+
+  for (const line of fs.readFileSync(fullPath, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    let entry;
+    try {
+      entry = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+
+    if (entry.type !== "assistant" || !entry.message || !Array.isArray(entry.message.content)) {
+      continue;
+    }
+
+    for (const content of entry.message.content) {
+      if (!content || content.type !== "tool_use") {
+        continue;
+      }
+
+      results.push({
+        index: index++,
+        name: content.name || null,
+        input: content.input || {},
+        timestamp: entry.timestamp || null,
+      });
+    }
+  }
+
+  return results;
+}
+
+function getTranscriptToolFilePaths(toolUse) {
+  const input = toolUse && toolUse.input ? toolUse.input : {};
+  const candidates = [];
+  if (typeof input.file_path === "string") {
+    candidates.push(input.file_path);
+  }
+  if (typeof input.path === "string") {
+    candidates.push(input.path);
+  }
+  return candidates
+    .map((entry) => normalizeComparablePath(entry))
+    .filter(Boolean);
+}
+
+function hasTranscriptRead(transcriptPath, targetPath) {
+  const target = normalizeComparablePath(targetPath);
+  if (!target) {
+    return false;
+  }
+
+  return readTranscriptToolUses(transcriptPath).some(
+    (toolUse) =>
+      toolUse.name === "Read" &&
+      getTranscriptToolFilePaths(toolUse).some((candidate) => candidate === target)
+  );
+}
+
+function hasTranscriptReadIfExists(transcriptPath, targetPath) {
+  if (!checkFileExists(targetPath)) {
+    return true;
+  }
+  return hasTranscriptRead(transcriptPath, targetPath);
+}
+
+function hasTranscriptTouch(transcriptPath, targetPath) {
+  const target = normalizeComparablePath(targetPath);
+  if (!target) {
+    return false;
+  }
+
+  const mutationTools = new Set(["Write", "Edit", "MultiEdit"]);
+  return readTranscriptToolUses(transcriptPath).some(
+    (toolUse) =>
+      mutationTools.has(toolUse.name) &&
+      getTranscriptToolFilePaths(toolUse).some((candidate) => candidate === target)
+  );
+}
+
+function hasTranscriptTouchAfter(transcriptPath, beforePath, afterPath) {
+  const beforeTarget = normalizeComparablePath(beforePath);
+  const afterTarget = normalizeComparablePath(afterPath);
+  if (!beforeTarget || !afterTarget) {
+    return false;
+  }
+
+  const mutationTools = new Set(["Write", "Edit", "MultiEdit"]);
+  const toolUses = readTranscriptToolUses(transcriptPath).filter((toolUse) =>
+    mutationTools.has(toolUse.name)
+  );
+
+  const beforeIndices = toolUses
+    .filter((toolUse) => getTranscriptToolFilePaths(toolUse).some((candidate) => candidate === beforeTarget))
+    .map((toolUse) => toolUse.index);
+  const afterIndices = toolUses
+    .filter((toolUse) => getTranscriptToolFilePaths(toolUse).some((candidate) => candidate === afterTarget))
+    .map((toolUse) => toolUse.index);
+
+  if (beforeIndices.length === 0 || afterIndices.length === 0) {
+    return false;
+  }
+
+  return afterIndices.some((afterIndex) => beforeIndices.some((beforeIndex) => afterIndex > beforeIndex));
+}
+
 function loadChecklistDefinitions() {
   return parseJsonFile("workflow/checklists/task-gate-checklists.json");
 }
@@ -654,6 +803,8 @@ function buildRoleState(roleName, required = true) {
     ),
     artifacts: [],
     missing_items: [],
+    failed_check_ids: [],
+    retry_scope: [],
     last_error: null,
     last_updated_at: nowIso(),
   };
@@ -782,8 +933,14 @@ function reopenRoleState(roleState, reason = null) {
   roleState.claim_path = null;
   roleState.artifacts = [];
   roleState.missing_items = [];
+  roleState.failed_check_ids = [];
+  roleState.retry_scope = [];
   roleState.last_error = reason;
   roleState.last_updated_at = nowIso();
+}
+
+function buildRetryScope(failedChecks) {
+  return failedChecks.map((entry) => `retry ${entry.id}: ${entry.label}`);
 }
 
 function ensureReviewGate(item) {
@@ -974,7 +1131,8 @@ function substituteCommand(template, context) {
     .replace(/\{role_index\}/g, String(context.role_index))
     .replace(/\{dispatch_created_at\}/g, context.dispatch_created_at || "")
     .replace(/\{dispatch_claimed_at\}/g, context.dispatch_claimed_at || "")
-    .replace(/\{dispatch_finished_at\}/g, context.dispatch_finished_at || "");
+    .replace(/\{dispatch_finished_at\}/g, context.dispatch_finished_at || "")
+    .replace(/\{agent_transcript_path\}/g, context.agent_transcript_path || "");
 }
 
 function runChecklist(state, context, checklistEntries) {
@@ -1178,6 +1336,8 @@ async function handleTaskCompleted() {
   context.roleState.claim_path = path.relative(resolveProjectRoot(), getClaimPath(state, meta));
   context.roleState.artifacts = context.roleState.artifacts || [];
   context.roleState.status = "done";
+  context.roleState.failed_check_ids = [];
+  context.roleState.retry_scope = [];
   context.roleState.last_updated_at = nowIso();
   saveState(state);
 
@@ -1222,8 +1382,12 @@ async function handleTaskCompleted() {
 
   if (failures.length > 0) {
     const validatedAt = nowIso();
+    const failedCheckIds = failedChecks.map((entry) => entry.id);
+    const retryScope = buildRetryScope(failedChecks);
     context.roleState.status = "blocked";
     context.roleState.missing_items = failures;
+    context.roleState.failed_check_ids = failedCheckIds;
+    context.roleState.retry_scope = retryScope;
     context.roleState.last_error = summarizeFailures(failures);
     context.roleState.last_updated_at = validatedAt;
 
@@ -1262,6 +1426,8 @@ async function handleTaskCompleted() {
   const validatedAt = nowIso();
   context.roleState.status = "done";
   context.roleState.missing_items = [];
+  context.roleState.failed_check_ids = [];
+  context.roleState.retry_scope = [];
   context.roleState.last_error = null;
   context.roleState.last_updated_at = validatedAt;
 
@@ -1562,6 +1728,10 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
     reviewGate.status = reviewGate.status === "idle" ? "open" : reviewGate.status;
     reviewGate.developer_review = ok ? "done" : "blocked";
     context.roleState.status = "todo";
+    context.roleState.failed_check_ids = [];
+    context.roleState.retry_scope = ok
+      ? []
+      : [`retry review bundle: ${reviewBundlePath} 작성 또는 갱신`];
     context.roleState.last_error = ok
       ? null
       : "developer review bundle missing or not updated after dispatch";
@@ -1584,6 +1754,10 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
     reviewGate.status = reviewGate.status === "idle" ? "open" : reviewGate.status;
     reviewGate.qa_review = ok ? "done" : "blocked";
     context.roleState.status = "todo";
+    context.roleState.failed_check_ids = [];
+    context.roleState.retry_scope = ok
+      ? []
+      : [`retry review bundle: ${reviewBundlePath} 작성 또는 갱신`];
     context.roleState.last_error = ok ? null : "qa review bundle missing or not updated after dispatch";
     context.roleState.last_updated_at = validatedAt;
     saveState(state);
@@ -1600,6 +1774,8 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
   if (meta.role === "designer" && dispatchEntry.mode === "review") {
     const validatedAt = nowIso();
     context.roleState.status = "in_progress";
+    context.roleState.failed_check_ids = [];
+    context.roleState.retry_scope = [];
     context.roleState.last_error = null;
     context.roleState.last_updated_at = validatedAt;
     saveState(state);
@@ -1627,6 +1803,7 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
     dispatch_created_at: dispatchEntry.created_at,
     dispatch_claimed_at: dispatchEntry.claimed_at,
     dispatch_finished_at: dispatchEntry.finished_at || nowIso(),
+    agent_transcript_path: payload.agent_transcript_path || "",
   };
 
   context.roleState.attempt += 1;
@@ -1648,6 +1825,8 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
     },
   ];
   context.roleState.status = "done";
+  context.roleState.failed_check_ids = [];
+  context.roleState.retry_scope = [];
   context.roleState.last_updated_at = nowIso();
   saveState(state);
 
@@ -1677,6 +1856,8 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
 
   if (failures.length > 0) {
     const validatedAt = nowIso();
+    const failedCheckIds = failedChecks.map((entry) => entry.id);
+    const retryScope = buildRetryScope(failedChecks);
     if (meta.role === "planner" && reviewGate.status !== "idle") {
       reviewGate.planner_response = "blocked";
     }
@@ -1685,6 +1866,8 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
     }
     context.roleState.status = "blocked";
     context.roleState.missing_items = failures;
+    context.roleState.failed_check_ids = failedCheckIds;
+    context.roleState.retry_scope = retryScope;
     context.roleState.last_error = summarizeFailures(failures);
     context.roleState.last_updated_at = validatedAt;
 
@@ -1719,6 +1902,8 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
   const validatedAt = nowIso();
   context.roleState.status = "done";
   context.roleState.missing_items = [];
+  context.roleState.failed_check_ids = [];
+  context.roleState.retry_scope = [];
   context.roleState.last_error = null;
   context.roleState.last_updated_at = validatedAt;
 
@@ -1835,6 +2020,43 @@ function recoverOpenDispatches(state) {
             resolution: result.ok ? "completed_from_stop_event" : "rejected_from_stop_event",
           });
           continue;
+        }
+
+        const claimedAt = Date.parse(entry.claimed_at || entry.created_at || "");
+        const staleClaimedWithoutStop =
+          entry.status === "claimed" &&
+          !Number.isNaN(claimedAt) &&
+          Date.now() - claimedAt > STALE_CLAIMED_WITHOUT_STOP_MS;
+
+        if (staleClaimedWithoutStop) {
+          const inferredTranscriptPath = inferAgentTranscriptPath(entry.session_id, entry.agent_id);
+          const transcriptExists = inferredTranscriptPath && fs.existsSync(inferredTranscriptPath);
+          if (transcriptExists) {
+            const syntheticPayload = {
+              agent_id: entry.agent_id,
+              agent_type: entry.agent_type || null,
+              agent_transcript_path: inferredTranscriptPath,
+              last_assistant_message: entry.last_assistant_message || null,
+            };
+            const result = finalizeDispatchEntry(state, entry, syntheticPayload);
+            entry.status = result.status;
+            entry.stop_reason = result.ok ? null : summarizeFailures(result.failures);
+            entry.finished_at = result.validatedAt;
+            recoveredEntries.push({
+              batch_id: meta.batch_id,
+              item_id: meta.item_id,
+              role: meta.role,
+              resolution: result.ok ? "completed_from_inferred_transcript" : "rejected_from_inferred_transcript",
+            });
+            continue;
+          }
+
+          recoveredEntries.push({
+            batch_id: meta.batch_id,
+            item_id: meta.item_id,
+            role: meta.role,
+            resolution: "claimed_without_stop_event_pending",
+          });
         }
       }
 
@@ -1988,6 +2210,23 @@ async function handleSubagentStop() {
     summary: dispatchEntry.summary,
   };
   const result = finalizeDispatchEntry(state, dispatchEntry, payload);
+
+  appendJsonLine(resolvePath("workspace/reports/hook-events.jsonl"), {
+    logged_at: nowIso(),
+    hook_event_name: "SubagentStopResult",
+    task_meta: meta,
+    extra: {
+      stage: "subagent-stop-result",
+      ok: result.ok,
+      status: result.status,
+      failures: result.failures,
+      retry_limit: result.retryLimit,
+    },
+    payload: {
+      agent_id: payload.agent_id || null,
+      agent_transcript_path: payload.agent_transcript_path || null,
+    },
+  });
 
   withDispatchLock((dispatchState) => {
     const latest = findDispatchByAgentId(dispatchState, payload.agent_id || null);
@@ -2165,6 +2404,18 @@ function handleCheck(args) {
     case "mtime_after":
       ok = checkMtimeAfter(rest[0], rest[1]);
       break;
+    case "transcript_read":
+      ok = hasTranscriptRead(rest[0], rest[1]);
+      break;
+    case "transcript_read_if_exists":
+      ok = hasTranscriptReadIfExists(rest[0], rest[1]);
+      break;
+    case "transcript_touch":
+      ok = hasTranscriptTouch(rest[0], rest[1]);
+      break;
+    case "transcript_touch_after":
+      ok = hasTranscriptTouchAfter(rest[0], rest[1], rest[2]);
+      break;
     default:
       printJson({
         ok: false,
@@ -2224,6 +2475,9 @@ function printUsage() {
       "validator.js check json_array_empty path/to/file field.path",
       "validator.js check json_field_matches path/to/file field.path '^wf_'",
       "validator.js check mtime_after path/to/file 2026-04-16T00:00:00.000Z",
+      "validator.js check transcript_read path/to/transcript.jsonl workspace/planning/request-workboard.md",
+      "validator.js check transcript_touch path/to/transcript.jsonl workspace/claims/Batch8/R17/planner.claim.json",
+      "validator.js check transcript_touch_after path/to/transcript.jsonl workspace/planning/A-planning-doc.md workspace/claims/Batch8/R17/planner.claim.json",
       "validator.js ensure-state-item Batch8 R17 \"Short title\""
     ],
     subject_pattern: SUBJECT_PATTERN.source,

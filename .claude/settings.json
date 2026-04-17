@@ -29,6 +29,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/scripts/validator.js\" hook-log"
+          },
+          {
+            "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/scripts/validator.js\" subagent-stop"
           }
         ]

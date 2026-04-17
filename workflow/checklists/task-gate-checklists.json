@@ -3,6 +3,41 @@
   "roles": {
     "planner": [
       {
+        "id": "planner_process_read_workboard",
+        "label": "planner transcript에 request-workboard.md Read 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_read {agent_transcript_path} workspace/planning/request-workboard.md"
+      },
+      {
+        "id": "planner_process_read_config",
+        "label": "planner transcript에 project-config.md Read 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_read {agent_transcript_path} workspace/planning/project-config.md"
+      },
+      {
+        "id": "planner_process_read_benchmark_if_exists",
+        "label": "A-benchmark.md가 있으면 planner transcript에 Read 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_read_if_exists {agent_transcript_path} workspace/planning/A-benchmark.md"
+      },
+      {
+        "id": "planner_process_write_planning_doc",
+        "label": "planner transcript에 A-planning-doc.md 쓰기 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_touch {agent_transcript_path} workspace/planning/A-planning-doc.md"
+      },
+      {
+        "id": "planner_process_claim_after_doc",
+        "label": "planner claim 쓰기 호출이 planning-doc 쓰기 이후에 존재",
+        "command": "node .claude/scripts/validator.js check transcript_touch_after {agent_transcript_path} workspace/planning/A-planning-doc.md workspace/claims/{batch_id}/{item_id}/planner.claim.json"
+      },
+      {
+        "id": "planner_process_wf_evidence_written",
+        "label": "planner transcript에 wf-export evidence 쓰기 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_touch {agent_transcript_path} workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json"
+      },
+      {
+        "id": "planner_process_desc_evidence_written",
+        "label": "planner transcript에 desc-export evidence 쓰기 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_touch {agent_transcript_path} workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json"
+      },
+      {
         "id": "planner_claim_recent",
         "label": "planner claim 파일이 현재 시도 이후 갱신됨",
         "command": "node .claude/scripts/validator.js check mtime_after workspace/claims/{batch_id}/{item_id}/planner.claim.json {dispatch_created_at}"
@@ -95,6 +130,31 @@
     ],
     "designer": [
       {
+        "id": "designer_process_read_workboard",
+        "label": "designer transcript에 request-workboard.md Read 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_read {agent_transcript_path} workspace/planning/request-workboard.md"
+      },
+      {
+        "id": "designer_process_read_planning_doc",
+        "label": "designer transcript에 A-planning-doc.md Read 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_read {agent_transcript_path} workspace/planning/A-planning-doc.md"
+      },
+      {
+        "id": "designer_process_write_design_export",
+        "label": "designer transcript에 design-export Write/Edit 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_touch {agent_transcript_path} workspace/evidence/designer/{batch_id}/{item_id}/design-export.json"
+      },
+      {
+        "id": "designer_process_write_boards_manifest",
+        "label": "designer transcript에 boards manifest Write/Edit 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_touch {agent_transcript_path} workspace/evidence/designer/{batch_id}/{item_id}/boards.json"
+      },
+      {
+        "id": "designer_process_claim_after_export",
+        "label": "designer transcript에서 claim Write가 design-export 이후에 실행됨",
+        "command": "node .claude/scripts/validator.js check transcript_touch_after {agent_transcript_path} workspace/evidence/designer/{batch_id}/{item_id}/design-export.json workspace/claims/{batch_id}/{item_id}/designer.claim.json"
+      },
+      {
         "id": "designer_claim_recent",
         "label": "designer claim 파일이 현재 시도 이후 갱신됨",
         "command": "node .claude/scripts/validator.js check mtime_after workspace/claims/{batch_id}/{item_id}/designer.claim.json {dispatch_created_at}"
@@ -162,6 +222,31 @@
     ],
     "developer": [
       {
+        "id": "developer_process_read_workboard",
+        "label": "developer transcript에 request-workboard.md Read 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_read {agent_transcript_path} workspace/planning/request-workboard.md"
+      },
+      {
+        "id": "developer_process_read_config",
+        "label": "developer transcript에 project-config.md Read 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_read {agent_transcript_path} workspace/planning/project-config.md"
+      },
+      {
+        "id": "developer_process_read_planning_doc",
+        "label": "developer transcript에 A-planning-doc.md Read 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_read {agent_transcript_path} workspace/planning/A-planning-doc.md"
+      },
+      {
+        "id": "developer_process_claim_written",
+        "label": "developer transcript에 developer claim Write/Edit 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_touch {agent_transcript_path} workspace/claims/{batch_id}/{item_id}/developer.claim.json"
+      },
+      {
+        "id": "developer_process_claim_after_impl",
+        "label": "developer transcript에서 claim Write가 evidence 생성 이후에 실행됨",
+        "command": "node .claude/scripts/validator.js check transcript_touch_after {agent_transcript_path} workspace/evidence/developer/{batch_id}/{item_id} workspace/claims/{batch_id}/{item_id}/developer.claim.json"
+      },
+      {
         "id": "developer_claim_recent",
         "label": "developer claim 파일이 현재 시도 이후 갱신됨",
         "command": "node .claude/scripts/validator.js check mtime_after workspace/claims/{batch_id}/{item_id}/developer.claim.json {dispatch_created_at}"
@@ -183,6 +268,26 @@
       }
     ],
     "qa": [
+      {
+        "id": "qa_process_read_workboard",
+        "label": "qa transcript에 request-workboard.md Read 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_read {agent_transcript_path} workspace/planning/request-workboard.md"
+      },
+      {
+        "id": "qa_process_read_config",
+        "label": "qa transcript에 project-config.md Read 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_read {agent_transcript_path} workspace/planning/project-config.md"
+      },
+      {
+        "id": "qa_process_read_planning_doc",
+        "label": "qa transcript에 A-planning-doc.md Read 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_read {agent_transcript_path} workspace/planning/A-planning-doc.md"
+      },
+      {
+        "id": "qa_process_claim_written",
+        "label": "qa transcript에 qa claim Write/Edit 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_touch {agent_transcript_path} workspace/claims/{batch_id}/{item_id}/qa.claim.json"
+      },
       {
         "id": "qa_claim_recent",
         "label": "qa claim 파일이 현재 시도 이후 갱신됨",
@@ -210,6 +315,31 @@
       }
     ],
     "tester": [
+      {
+        "id": "tester_process_read_workboard",
+        "label": "tester transcript에 request-workboard.md Read 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_read {agent_transcript_path} workspace/planning/request-workboard.md"
+      },
+      {
+        "id": "tester_process_read_config",
+        "label": "tester transcript에 project-config.md Read 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_read {agent_transcript_path} workspace/planning/project-config.md"
+      },
+      {
+        "id": "tester_process_read_planning_doc",
+        "label": "tester transcript에 A-planning-doc.md Read 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_read {agent_transcript_path} workspace/planning/A-planning-doc.md"
+      },
+      {
+        "id": "tester_process_claim_written",
+        "label": "tester transcript에 tester claim Write/Edit 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_touch {agent_transcript_path} workspace/claims/{batch_id}/{item_id}/tester.claim.json"
+      },
+      {
+        "id": "tester_process_state_written",
+        "label": "tester transcript에 .tester-state.json Write/Edit 호출 존재",
+        "command": "node .claude/scripts/validator.js check transcript_touch {agent_transcript_path} workspace/testing/.tester-state.json"
+      },
       {
         "id": "tester_claim_recent",
         "label": "tester claim 파일이 현재 시도 이후 갱신됨",

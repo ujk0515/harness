@@ -49,12 +49,17 @@
 ## 텍스트 배치
 - 텍스트는 `left align + auto-height`
 - 높이를 고정하지 않는다.
+- `resize(width, smallSeedHeight)`는 초기 씨드값일 뿐이고, 실제 높이로 간주하지 않는다.
+- 다음 블록 위치는 **반드시 auto-height 적용 후의 실측 `descText.height`**를 읽어 계산한다.
+- 실측 높이 확인 전에는 다음 번호 블록을 배치하지 않는다.
+- 한글 줄 수가 늘어나면 블록 높이도 늘어난다고 가정한다.
 
 ```javascript
-descText.resize(380, 20);
+descText.resize(380, 8); // seed height only
 descText.growType = "auto-height";
 await new Promise((r) => setTimeout(r, 100));
-const nextY = descText.y + descText.height + 16;
+const measuredHeight = descText.height;
+const nextY = descText.y + measuredHeight + 16;
 ```
 
 ## 실행 분할

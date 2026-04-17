@@ -30,6 +30,13 @@
 
 ### Planner
 
+- transcript에 `workspace/planning/request-workboard.md` Read 호출 존재
+- transcript에 `workspace/planning/project-config.md` Read 호출 존재
+- `workspace/planning/A-benchmark.md`가 있으면 transcript에 Read 호출 존재
+- transcript에 `workspace/planning/A-planning-doc.md` 쓰기 호출 존재
+- transcript에서 planner claim 쓰기 호출이 planning doc 쓰기 이후에 존재
+- transcript에 `workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json` 쓰기 호출 존재
+- transcript에 `workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json` 쓰기 호출 존재
 - `workspace/claims/{batch_id}/{item_id}/planner.claim.json`가 현재 시도 이후 갱신
 - claim의 `covered_items`에 현재 `item_id` 포함
 - claim 안의 `wf_boards`, `desc_boards`가 비어 있지 않음
@@ -43,6 +50,11 @@
 
 ### Designer
 
+- transcript에 `workspace/planning/request-workboard.md` Read 호출 존재
+- transcript에 `workspace/planning/A-planning-doc.md` Read 호출 존재
+- transcript에 `workspace/evidence/designer/{batch_id}/{item_id}/design-export.json` 쓰기 호출 존재
+- transcript에 `workspace/evidence/designer/{batch_id}/{item_id}/boards.json` 쓰기 호출 존재
+- transcript에서 designer claim 쓰기 호출이 design-export 쓰기 이후에 존재
 - `workspace/claims/{batch_id}/{item_id}/designer.claim.json`가 현재 시도 이후 갱신
 - claim의 `covered_items`에 현재 `item_id` 포함
 - claim의 `developer_ready = Y`
@@ -56,6 +68,11 @@
 
 ### Developer
 
+- transcript에 `workspace/planning/request-workboard.md` Read 호출 존재
+- transcript에 `workspace/planning/project-config.md` Read 호출 존재
+- transcript에 `workspace/planning/A-planning-doc.md` Read 호출 존재
+- transcript에 `workspace/claims/{batch_id}/{item_id}/developer.claim.json` Write/Edit 호출 존재
+- transcript에서 developer claim 쓰기 호출이 구현 evidence 생성 이후에 존재
 - `workspace/claims/{batch_id}/{item_id}/developer.claim.json`가 현재 시도 이후 갱신
 - claim의 `covered_items`에 현재 `item_id` 포함
 - `workspace/evidence/developer/{batch_id}/{item_id}/`에 현재 시도 이후 evidence 존재
@@ -63,6 +80,10 @@
 
 ### QA
 
+- transcript에 `workspace/planning/request-workboard.md` Read 호출 존재
+- transcript에 `workspace/planning/project-config.md` Read 호출 존재
+- transcript에 `workspace/planning/A-planning-doc.md` Read 호출 존재
+- transcript에 `workspace/claims/{batch_id}/{item_id}/qa.claim.json` Write/Edit 호출 존재
 - `workspace/claims/{batch_id}/{item_id}/qa.claim.json`가 현재 시도 이후 갱신
 - `workspace/evidence/qa/{batch_id}/{item_id}/`에 현재 시도 이후 evidence 존재
 - `workspace/reports/.qa-last-run.json`이 현재 시도 이후 갱신
@@ -71,6 +92,11 @@
 
 ### Tester
 
+- transcript에 `workspace/planning/request-workboard.md` Read 호출 존재
+- transcript에 `workspace/planning/project-config.md` Read 호출 존재
+- transcript에 `workspace/planning/A-planning-doc.md` Read 호출 존재
+- transcript에 `workspace/claims/{batch_id}/{item_id}/tester.claim.json` Write/Edit 호출 존재
+- transcript에 `workspace/testing/.tester-state.json` Write/Edit 호출 존재
 - `workspace/claims/{batch_id}/{item_id}/tester.claim.json`가 현재 시도 이후 갱신
 - `workspace/evidence/tester/{batch_id}/{item_id}/`에 현재 시도 이후 evidence 존재
 - `workspace/reports/playwright-results.json`이 현재 시도 이후 갱신

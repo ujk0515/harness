@@ -253,6 +253,8 @@
   - `done_ticket`
   - `skip_ticket`
   - `missing_items`
+  - `failed_check_ids`
+  - `retry_scope`
 - 에이전트는 `done ticket`을 직접 발급하지 않는다.
   - 에이전트는 claim / evidence를 쓴다.
   - validator가 체크리스트를 검사하고 통과 시 `done ticket`을 발급한다.
@@ -292,6 +294,9 @@
 #### 루프백 / 재시도 규칙
 - 체크리스트 항목 중 1개라도 실패하면 validator는 `done ticket`을 발급하지 않는다.
 - `SubagentStop`가 차단되면 같은 역할은 **완료로 닫히지 않으며**, 누락 항목을 받은 상태로 다시 루프를 돈다.
+- 같은 역할을 다시 호출할 때는 `request-state.json`의 해당 role `failed_check_ids`와 `retry_scope`를 먼저 읽고, **실패한 체크 항목만 보완**한다.
+- 이미 `pass`한 작업, 이미 최신 상태인 산출물, 이미 통과한 체크는 다시 처음부터 만들지 않는다.
+- 즉 재시도 기본값은 `전체 재작업`이 아니라 `부분 보완`이다.
 - 다음 역할은 predecessor 역할의 `done ticket` 또는 `skip ticket`이 없으면 `PreToolUse(Agent)` 단계에서 생성 자체가 차단된다.
 - 기본 재시도 상한은 항목별 `retry_limit = 3`이다.
 - 상한을 넘겨도 ticket이 발급되지 않으면 하네스는 해당 항목을 `blocked`로 유지하고 사용자에게 에스컬레이션한다.
@@ -353,6 +358,7 @@
   - `maxTurns` 도달, 도구 실패, 외부 의존성 때문에 다음 역할이 바로 이어질 수 없음
 - 미완료 역할이 하나라도 있으면 현재 루프는 `완료`가 아니다.
 - 미완료 상태에서는 다음 루프로 넘어가지 않고, 하네스는 해당 역할을 다시 호출하거나 `blocked` 사유를 정리한 뒤 같은 루프 안에서 이어간다.
+- 같은 역할 재호출 시에는 `missing_items` 전체를 다시 풀어쓰는 대신 `failed_check_ids` / `retry_scope`에 적힌 실패 항목만 전달해 부분 보완 루프로 돌린다.
 - `루프 완료`, `개발 완료`, `최종 완료` 같은 문구는 **필수 역할이 모두 `done` 또는 `skipped`이고 `completion_state = complete`일 때만** 사용한다.
 
 #### QA / tester 파일 우선 완료 판정
@@ -548,24 +554,24 @@
 ### 루프 A-1: 기획서 + Penpot 와이어프레임 작성 + 디자이너 UX 리뷰
 1. 현재 요청 배치의 열린 각 `item_id`마다 순서대로 아래를 수행한다.
 2. `node .claude/scripts/validator.js ensure-state-item Batch{N} R{M} "{요청 항목 요약}"`로 state를 초기화한다.
-3. Agent(planner) 호출: `"[Batch{N}][R{M}][planner] plan: {요청 항목 요약}"` + "요구사항: {item 기준 요약}. 작업 보드: workspace/planning/request-workboard.md. 벤치마킹: workspace/planning/A-benchmark.md. 먼저 유사 흐름/많이 쓰는 UX 패턴/사용자 관성을 조사·취합한 뒤 기획서 작성 + Penpot 와이어프레임 생성해. 각 화면마다 `wf_[id]` Board와 `desc_[id]` Board를 따로 만들고, 라벨/디스크립션/상태별 화면을 포함해"
+3. Agent(planner) 호출: `"[Batch{N}][R{M}][planner] plan: {요청 항목 요약}"` + "시작 순서 고정: 1) `request-workboard.md`, `project-config.md`, `A-benchmark.md`를 먼저 읽어 2) 기존 `screen_id` / `wf_*` / `desc_*` / `design_*` 영향도를 분석하고 3) `reference_flows`, `expected_user_path`, `critical_states`, `avoid_patterns`를 먼저 채우고 4) `UPDATE` / `CREATE` / `UPDATE+CREATE` / `NO_CHANGE`를 판별한 뒤 5) 기획서 + `wf_*` + `desc_*` + `export_shape`를 처리하고 6) gap check + 디자이너 가이드 + claim/evidence + 자가점검까지 끝내기 전에는 완료처럼 말하지 마. blocked 재호출이면 `request-state.json`의 planner `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 체크 항목만 보완해. 이미 pass한 항목은 처음부터 다시 하지 마. claim 템플릿: `workspace/claims/Batch{N}/R{M}/planner.claim.json`에 저장하고 최소 `{ batch_id, item_id, role, completion_state, unfinished_reason, covered_items, missing_items, wf_boards, desc_boards, reference_flows, expected_user_path, critical_states, avoid_patterns, export_shape_summary }`를 포함해. evidence는 `workspace/evidence/planner/Batch{N}/R{M}/wf-export.json` + `desc-export.json`를 남기고, 각 파일에는 최소 `{ type, screen_id, board_id, board_name, exported_at }`를 포함해. 요구사항: {item 기준 요약}. 작업 보드: workspace/planning/request-workboard.md. 벤치마킹: workspace/planning/A-benchmark.md. 각 화면마다 `wf_[id]` Board와 `desc_[id]` Board를 따로 만들고, 라벨/디스크립션/상태별 화면을 포함해"
    - 작업 보드에 `matched_screen_id = 없음`이고 CREATE 후보 사유가 있으면 planner는 신규 화면 여부를 먼저 확정한다
    - 신규 화면으로 확정되면 새 `wf_*` / `desc_*`를 만들고, 디자이너에게 `action: CREATE` 가이드를 넘긴다
    - planner는 결과를 반환하기 전에 작업 보드의 각 `요청 항목`이 기획서 + `wf_*` + `desc_*`에 반영되었는지 gap check를 수행하고 `request_coverage`를 함께 반환한다
    - 신규 화면으로 확정된 항목도 루프 A-3 이후 일반 화면과 동일하게 `developer → QA/tester → secretary` 흐름으로 이어진다
-4. Agent(designer) 호출: `"[Batch{N}][R{M}][designer] review: ux review {요청 항목 요약}"` + "기획서: {경로}. `wf_*`와 `desc_*`를 확인해서 UX 관점으로 리뷰해. 개선 필요 여부 판단해"
+4. Agent(designer) 호출: `"[Batch{N}][R{M}][designer] review: ux review {요청 항목 요약}"` + "시작 순서 고정: 1) `request-workboard.md` + 기획서 + 대응 `wf_*` / `desc_*`를 먼저 읽어 2) UX 관점에서 동선, 정보 구조, 상태 누락, 헷갈리는 지점을 리뷰하고 3) 결과를 `workspace/design/A-uiux-review.md`에 저장해. blocked 재호출이면 `request-state.json`의 designer `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 항목만 보완해. 이 모드에서는 `design_*`, claim/evidence, done ticket을 만들지 마"
 5. 개선사항 없음 → 해당 `item_id`는 루프 A-2 건너뛰고 A-3으로
 6. 개선사항 있음 → 해당 `item_id`는 루프 A-2로
 
 ### 루프 A-2: 디자이너 ↔ 기획자 화면 개선
 1. 루프 A-1에서 개선사항이 남은 같은 `item_id`에 대해서만 반복한다.
-2. Agent(planner) 호출: `"[Batch{N}][R{M}][planner] revise: {요청 항목 요약}"` + "디자이너 리뷰: {경로}. 작업 보드: workspace/planning/request-workboard.md. 반영하여 기획서 수정 + `wf_*` + `desc_*` 수정해"
-3. Agent(designer) 호출: `"[Batch{N}][R{M}][designer] review: ux re-review {요청 항목 요약}"` + "기획서 + `wf_*` + `desc_*`를 재검토해. 점수 반환해"
+2. Agent(planner) 호출: `"[Batch{N}][R{M}][planner] revise: {요청 항목 요약}"` + "시작 순서 고정: 1) `request-workboard.md`와 디자이너 리뷰를 먼저 읽어 2) 수정 대상 `screen_id`와 기존 `wf_*` / `desc_*` 영향을 다시 확인하고 3) 필요한 기획서 + `wf_*` + `desc_*`만 수정하고 4) `export_shape` + gap check + claim/evidence + 자가점검까지 끝내기 전에는 완료처럼 말하지 마. blocked 재호출이면 `request-state.json`의 planner `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 체크 항목만 보완해. 이미 pass한 항목은 처음부터 다시 하지 마. claim 템플릿: `workspace/claims/Batch{N}/R{M}/planner.claim.json`에 저장하고 최소 `{ batch_id, item_id, role, completion_state, unfinished_reason, covered_items, missing_items, wf_boards, desc_boards, reference_flows, expected_user_path, critical_states, avoid_patterns, export_shape_summary }`를 포함해. evidence는 `workspace/evidence/planner/Batch{N}/R{M}/wf-export.json` + `desc-export.json`를 남기고, 각 파일에는 최소 `{ type, screen_id, board_id, board_name, exported_at }`를 포함해. 디자이너 리뷰: {경로}. 작업 보드: workspace/planning/request-workboard.md. 반영하여 기획서 수정 + `wf_*` + `desc_*` 수정해"
+3. Agent(designer) 호출: `"[Batch{N}][R{M}][designer] review: ux re-review {요청 항목 요약}"` + "시작 순서 고정: 1) `request-workboard.md` + 기획서 + 대응 `wf_*` / `desc_*`를 다시 읽어 2) 직전 리뷰에서 지적한 항목이 반영됐는지 확인하고 3) `workspace/design/A-uiux-review.md`를 갱신해. blocked 재호출이면 `request-state.json`의 designer `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 항목만 보완해. 이 모드에서는 `design_*`, claim/evidence, done ticket을 만들지 마"
 4. 통과 기준 미만 → 2번 반복
 5. 통과 기준 이상 → 해당 `item_id`의 루프 A-2 완료
 
 ### 루프 A-3: 디자이너 Penpot 디자인 적용
-1. 루프 A-1/A-2를 통과한 각 `item_id`마다 Agent(designer) 호출: `"[Batch{N}][R{M}][designer] apply: design apply {요청 항목 요약}"` + "기획서 + `wf_*` + `desc_*`를 참조하여 `design_*` Board를 새로 생성/수정해. 기존 와이어프레임 Board는 수정하지 마"
+1. 루프 A-1/A-2를 통과한 각 `item_id`마다 Agent(designer) 호출: `"[Batch{N}][R{M}][designer] apply: design apply {요청 항목 요약}"` + "시작 순서 고정: 1) `request-workboard.md` + 기획서 + 대응 `wf_*` / `desc_*`를 먼저 읽어 2) planner 구조화 가이드와 현재 화면 상태를 확인하고 3) `design_*` Board를 생성/수정한 뒤 4) `export_shape` 확인 + gap check + claim/evidence + 자가점검까지 끝내기 전에는 완료처럼 말하지 마. blocked 재호출이면 `request-state.json`의 designer `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 체크 항목만 보완해. 이미 pass한 항목은 처음부터 다시 하지 마. claim 템플릿: `workspace/claims/Batch{N}/R{M}/designer.claim.json`에 저장하고 최소 `{ batch_id, item_id, role, action, completion_state, unfinished_reason, developer_ready, developer_reason, developer_targets, request_coverage, covered_items, missing_items, design_boards }`를 포함해. evidence는 `workspace/evidence/designer/Batch{N}/R{M}/design-export.json` + `boards.json`를 남기고, `design-export.json`에는 최소 `{ type, board_id, board_name, exported_at }`, `boards.json`에는 최소 `{ design_boards }`를 포함해. 기존 와이어프레임 Board는 수정하지 마"
    - designer는 반환 시 `developer_ready`, `developer_reason`, `developer_targets`를 함께 넘겨 다음 단계 구현 가능 여부를 명시한다
    - designer는 결과를 반환하기 전에 작업 보드의 각 `요청 항목`이 `design_*`에 반영되었는지 gap check를 수행하고 `request_coverage`를 함께 반환한다
    - `design_*`는 대응 `wf_*` / `desc_*` 쌍의 실제 하단 아래에 배치하고, 같은 페이지에서 x축 정렬을 맞춘다
@@ -574,18 +580,18 @@
 
 ### 루프 B: 기획 리뷰 + 반영 루프 (개발자 + QA + 기획자 + 디자이너)
 이 루프는 **기획서 + `wf_*` + `desc_*` + `design_*` 1차 완료 직후 반드시 실행되는 review gate**다. 이 루프가 닫히기 전에는 developer 구현이 열리지 않는다.
-1. 각 `item_id`마다 Agent(developer) 호출: `"[Batch{N}][R{M}][developer] review: feasibility review {요청 항목 요약}"` + "기획서 + `wf_*` + `desc_*` + `design_*`를 읽고 개발 가능 여부, 구현 난이도, 기술 리스크, 변경 요청 사항을 정리해. 결과는 `workspace/reviews/{batch_id}/{item_id}/developer-review.md`에 남겨. 이 단계에서는 구현 산출물을 만들지 마"
-2. 각 `item_id`마다 Agent(qa) 호출: `"[Batch{N}][R{M}][qa] review: planning review {요청 항목 요약}"` + "기획서 + `wf_*` + `desc_*` + `design_*`를 읽고 사용자 시점의 누락, 헷갈리는 동선, 테스트 관점 리스크, UI/UX 불편 요소를 정리해. 결과는 `workspace/reviews/{batch_id}/{item_id}/qa-review.md`에 남겨. 이 단계에서는 테스트케이스/검증 산출물을 만들지 마"
-3. Agent(planner) 호출: `"[Batch{N}][R{M}][planner] revise: {요청 항목 요약}"` + "각 item의 `developer-review.md` + `qa-review.md`만 읽고, 수긍/반박/보완 계획을 반영하여 기획서 + 필요시 `wf_*` + `desc_*`를 수정해. 변경 분류와 반영 여부를 명시해"
-4. Agent(designer) 호출: `"[Batch{N}][R{M}][designer] apply: review sync {요청 항목 요약}"` + "각 item의 `developer-review.md` + `qa-review.md`와 planner 반영 결과만 읽고 `design_*`를 재동기화해. 변경이 없으면 그 사유를 남기고, 변경이 있으면 `design_*`를 실제로 다시 맞춰"
+1. 각 `item_id`마다 Agent(developer) 호출: `"[Batch{N}][R{M}][developer] review: feasibility review {요청 항목 요약}"` + "시작 순서 고정: 1) `request-workboard.md` + 기획서 + 대응 `wf_*` / `desc_*` / `design_*`를 먼저 읽어 2) 구현 가능 여부, 난이도, 기술 리스크, 변경 요청만 정리하고 3) 결과를 `workspace/reviews/{batch_id}/{item_id}/developer-review.md`에 저장해. blocked 재호출이면 `request-state.json`의 developer `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 항목만 보완해. 이 모드에서는 claim/evidence/코드 수정/구현 done ticket을 만들지 마"
+2. 각 `item_id`마다 Agent(qa) 호출: `"[Batch{N}][R{M}][qa] review: planning review {요청 항목 요약}"` + "시작 순서 고정: 1) `request-workboard.md` + 기획서 + 대응 `wf_*` / `desc_*` / `design_*`를 먼저 읽어 2) 사용자 시점 누락, 모호점, UIUX 리스크, 테스트 관점 리스크만 정리하고 3) 결과를 `workspace/reviews/{batch_id}/{item_id}/qa-review.md`에 저장해. blocked 재호출이면 `request-state.json`의 qa `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 항목만 보완해. 이 모드에서는 테스트케이스/검증 보고서/claim/evidence/done ticket을 만들지 마"
+3. Agent(planner) 호출: `"[Batch{N}][R{M}][planner] revise: {요청 항목 요약}"` + "시작 순서 고정: 1) 각 item의 `developer-review.md` + `qa-review.md`만 먼저 읽고 2) `수긍` / `반박` / `보완` / `보류`를 정한 뒤 3) 기획서 + 필요시 `wf_*` + `desc_*`를 수정하고 4) `export_shape` + gap check + claim/evidence + 자가점검까지 끝내기 전에는 완료처럼 말하지 마. blocked 재호출이면 `request-state.json`의 planner `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 체크 항목만 보완해. 이미 pass한 항목은 처음부터 다시 하지 마. claim 템플릿: `workspace/claims/Batch{N}/R{M}/planner.claim.json`에 저장하고 최소 `{ batch_id, item_id, role, completion_state, unfinished_reason, covered_items, missing_items, wf_boards, desc_boards, reference_flows, expected_user_path, critical_states, avoid_patterns, export_shape_summary }`를 포함해. evidence는 `workspace/evidence/planner/Batch{N}/R{M}/wf-export.json` + `desc-export.json`를 남기고, 각 파일에는 최소 `{ type, screen_id, board_id, board_name, exported_at }`를 포함해. 각 item의 `developer-review.md` + `qa-review.md`만 읽고, 수긍/반박/보완 계획을 반영하여 기획서 + 필요시 `wf_*` + `desc_*`를 수정해. 변경 분류와 반영 여부를 명시해"
+4. Agent(designer) 호출: `"[Batch{N}][R{M}][designer] apply: review sync {요청 항목 요약}"` + "시작 순서 고정: 1) 각 item의 `developer-review.md` + `qa-review.md`와 planner 반영 결과만 먼저 읽어 2) 변경 영향이 있는 `design_*`만 재동기화하고 3) `export_shape` 확인 + claim/evidence + 자가점검까지 끝내기 전에는 완료처럼 말하지 마. blocked 재호출이면 `request-state.json`의 designer `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 체크 항목만 보완해. 이미 pass한 항목은 처음부터 다시 하지 마. claim 템플릿: `workspace/claims/Batch{N}/R{M}/designer.claim.json`에 저장하고 최소 `{ batch_id, item_id, role, action, completion_state, unfinished_reason, developer_ready, developer_reason, developer_targets, request_coverage, covered_items, missing_items, design_boards }`를 포함해. evidence는 `workspace/evidence/designer/Batch{N}/R{M}/design-export.json` + `boards.json`를 남기고, `design-export.json`에는 최소 `{ type, board_id, board_name, exported_at }`, `boards.json`에는 최소 `{ design_boards }`를 포함해. 변경이 없으면 그 사유를 남기고, 변경이 있으면 `design_*`를 실제로 다시 맞춰"
 5. 통과 기준 미만 → 1번부터 같은 `item_id`로 반복
 6. 통과 기준 이상:
    - Agent(secretary) 호출: "루프 B 완료 기록. 개발자/QA 리뷰, planner 반영, designer 재동기화 결과를 기준으로 이번 루프 요약을 agent-log에 기록해"
    - 루프 B 완료
 
 ### 루프 C: 개발 + 테스트케이스 작성 (동시 진행)
-1. 각 `item_id`마다 Agent(developer) 호출: `"[Batch{N}][R{M}][developer] implement: build {요청 항목 요약}"` + "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md. `wf_*`, `desc_*`, `design_*`를 참조하여 프론트엔드 개발해 (workspace/development/). 서버 스택이 있으면 workspace/server/에 서버도 개발해. 구현 완료 전 각 `요청 항목`이 코드와 화면 동작에 반영되었는지 gap check하고 `request_coverage`를 반환해"
-2. 각 `item_id`마다 Agent(qa) 호출: `"[Batch{N}][R{M}][qa] tc: write testcases {요청 항목 요약}"` + "project-config.md + 기획서: {경로} + 작업 보드: workspace/planning/request-workboard.md + 직전 QA 상태: workspace/reports/.qa-last-run.json. `wf_*`, `desc_*`, `design_*`를 확인해. 테스트케이스 작성해 (프론트 + 서버 API 둘 다). 상세는 파일에 저장하고 반환은 경량 요약만 해"
+1. 각 `item_id`마다 Agent(developer) 호출: `"[Batch{N}][R{M}][developer] implement: build {요청 항목 요약}"` + "시작 순서 고정: 1) `request-workboard.md` + `project-config.md` + 기획서 + 대응 `wf_*` / `desc_*` / `design_*`를 먼저 읽어 2) planner/designer 선행 산출물과 review gate를 확인하고 3) 코드 구현 + claim/evidence + gap check + 자가점검까지 끝내기 전에는 완료처럼 말하지 마. blocked 재호출이면 `request-state.json`의 developer `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 체크 항목만 보완해. 이미 pass한 항목은 처음부터 다시 하지 마. claim 템플릿: `workspace/claims/Batch{N}/R{M}/developer.claim.json`에 저장하고 최소 `{ batch_id, item_id, role, completion_state, unfinished_reason, request_coverage, covered_items, missing_items, changed_paths, command_summary }`를 포함해. evidence는 `workspace/evidence/developer/Batch{N}/R{M}/...`에 현재 시도 기준으로 남겨. `wf_*`, `desc_*`, `design_*`를 참조하여 프론트엔드 개발해 (workspace/development/). 서버 스택이 있으면 workspace/server/에 서버도 개발해. 구현 완료 전 각 `요청 항목`이 코드와 화면 동작에 반영되었는지 gap check하고 `request_coverage`를 반환해"
+2. 각 `item_id`마다 Agent(qa) 호출: `"[Batch{N}][R{M}][qa] tc: write testcases {요청 항목 요약}"` + "시작 순서 고정: 1) `request-workboard.md` + `project-config.md` + 기획서 + 대응 `wf_*` / `desc_*` / `design_*`를 먼저 읽어 2) `workspace/testing/C-testcases.md`에 테스트케이스를 작성하고 3) claim/evidence + `.qa-last-run.json` + 자가점검까지 끝내기 전에는 완료처럼 말하지 마. blocked 재호출이면 `request-state.json`의 qa `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 체크 항목만 보완해. 이미 pass한 항목은 처음부터 다시 하지 마. claim 템플릿: `workspace/claims/Batch{N}/R{M}/qa.claim.json`에 저장하고 최소 `{ batch_id, item_id, role, mode, completion_state, unfinished_reason, qa_status, covered_scope, report_path, testcase_path }`를 포함해. evidence는 `workspace/evidence/qa/Batch{N}/R{M}/...`에 현재 시도 기준으로 남겨. 직전 QA 상태: workspace/reports/.qa-last-run.json. 상세는 파일에 저장하고 반환은 경량 요약만 해"
 3. 하네스가 developer / QA 반환값과 작업 보드의 `developer_status`, `qa_status`를 함께 확인한다
    - QA 반환이 짧거나 일부 잘렸더라도 `workspace/reports/.qa-last-run.json`과 `workspace/testing/C-testcases.md`가 최신이면 파일 우선 규칙으로 완료 여부를 판단한다
    - 현재 요청 배치에 `developer`가 필수인데 `tester_status = skipped`로 기록돼 있으면 배치 오류다. 하네스는 이를 자동 수정하고 tester를 같은 배치의 필수 역할로 복구한 뒤 진행한다.
@@ -597,8 +603,8 @@
    - 루프 C 완료
 
 ### 루프 D: 개발 ↔ 검증
-1. Agent(qa) 호출: `"[Batch{N}][R{M}][qa] verify: static verify {요청 항목 요약}"` + "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로} + planner/designer/developer request_coverage + 직전 QA 상태: workspace/reports/.qa-last-run.json. 코드 정적 분석으로 검증해. 상세는 파일에 저장하고 반환은 경량 요약만 해"
-2. Agent(tester) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 결과물: {경로}, 테스트케이스: {경로} + planner/designer/developer request_coverage + 직전 테스터 상태: workspace/testing/.tester-state.json + 직전 테스터 요약: workspace/reports/.tester-last-run.json. Playwright로 브라우저 실행 테스트해. 상세는 파일에 저장하고 반환은 경량 요약만 해"
+1. Agent(qa) 호출: `"[Batch{N}][R{M}][qa] verify: static verify {요청 항목 요약}"` + "시작 순서 고정: 1) `request-workboard.md` + `project-config.md` + 기획서 + 대응 `wf_*` / `desc_*` / `design_*` + 결과물 + 테스트케이스를 먼저 읽어 2) 정적 검증 보고서를 `workspace/reports/D-qa-verification.md`에 작성하고 3) claim/evidence + `.qa-last-run.json` + 자가점검까지 끝내기 전에는 완료처럼 말하지 마. blocked 재호출이면 `request-state.json`의 qa `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 체크 항목만 보완해. 이미 pass한 항목은 처음부터 다시 하지 마. claim 템플릿: `workspace/claims/Batch{N}/R{M}/qa.claim.json`에 저장하고 최소 `{ batch_id, item_id, role, mode, completion_state, unfinished_reason, qa_status, covered_scope, report_path, testcase_path }`를 포함해. evidence는 `workspace/evidence/qa/Batch{N}/R{M}/...`에 현재 시도 기준으로 남겨. planner/designer/developer request_coverage + 직전 QA 상태: workspace/reports/.qa-last-run.json. 상세는 파일에 저장하고 반환은 경량 요약만 해"
+2. Agent(tester) 호출: `"[Batch{N}][R{M}][tester] browser verify {요청 항목 요약}"` + "시작 순서 고정: 1) `request-workboard.md` + `project-config.md` + 기획서 + 대응 `wf_*` / `desc_*` / `design_*` + 테스트케이스를 먼저 읽어 2) 실행 환경 준비 → Playwright spec 작성/보완 → 실행 → 보고서/결과 저장 순서로 진행하고 3) claim/evidence + `.tester-state.json` + `.tester-last-run.json` + 자가점검까지 끝내기 전에는 완료처럼 말하지 마. blocked 재호출이면 `request-state.json`의 tester `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 체크 항목만 보완해. 이미 pass한 항목은 처음부터 다시 하지 마. claim 템플릿: `workspace/claims/Batch{N}/R{M}/tester.claim.json`에 저장하고 최소 `{ batch_id, item_id, role, completion_state, unfinished_reason, tester_status, executed_scope, report_path, playwright_result_path, playwright_log_path }`를 포함해. evidence는 `workspace/evidence/tester/Batch{N}/R{M}/...`에 현재 시도 기준으로 남겨. planner/designer/developer request_coverage + 직전 테스터 상태: workspace/testing/.tester-state.json + 직전 테스터 요약: workspace/reports/.tester-last-run.json. Playwright로 브라우저 실행 테스트해. 상세는 파일에 저장하고 반환은 경량 요약만 해"
    - 요청 배치에 `developer`가 필수였던 항목은 기본적으로 tester도 필수다. 시간 절약을 이유로 tester를 생략하지 않는다.
 3. QA(정적 분석) + 테스터(브라우저 실행) 점수 종합 (둘 중 낮은 점수 기준)
 4. 통과 기준 미만 → **위 `이슈 분류 / 라우팅 규약`의 `[분류]` 값 기준으로 분기한다**
@@ -606,8 +612,8 @@
    - `화면 문제` → Agent(designer) 수정 후 필요 시 Agent(planner) 확인 → 루프 C-1번으로
    - `동작 오류` → Agent(developer) 수정 → 5번으로
 5. **재검증 (턴 2 이후):** 하네스가 이전 이슈 목록 + 개발자 수정 내역을 함께 전달한다
-   - Agent(qa) 호출: `"[Batch{N}][R{M}][qa] verify: static re-verify {요청 항목 요약}"` + "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분} + 직전 QA 상태: workspace/reports/.qa-last-run.json. 수정된 부분 확인 + 회귀 없는지 체크해. 상세는 파일에 저장하고 반환은 경량 요약만 해"
-   - Agent(tester) 호출: "project-config.md + 기획서 + 작업 보드: workspace/planning/request-workboard.md + `wf_*` + `desc_*` + `design_*` + 이전 이슈: {목록}, 수정 내역: {변경분} + 직전 테스터 상태: workspace/testing/.tester-state.json + 직전 테스터 요약: workspace/reports/.tester-last-run.json. 수정된 부분 Playwright로 재테스트 + 기존 PASS 항목 회귀 체크해. 상세는 파일에 저장하고 반환은 경량 요약만 해"
+   - Agent(qa) 호출: `"[Batch{N}][R{M}][qa] verify: static re-verify {요청 항목 요약}"` + "시작 순서 고정: 1) `request-workboard.md` + `project-config.md` + 기획서 + 대응 `wf_*` / `desc_*` / `design_*` + 이전 이슈 + 수정 내역을 먼저 읽어 2) 수정된 부분 확인 + 회귀 체크를 `workspace/reports/D-qa-verification.md`에 갱신하고 3) claim/evidence + `.qa-last-run.json` + 자가점검까지 끝내기 전에는 완료처럼 말하지 마. blocked 재호출이면 `request-state.json`의 qa `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 체크 항목만 보완해. 이미 pass한 항목은 처음부터 다시 하지 마. claim 템플릿: `workspace/claims/Batch{N}/R{M}/qa.claim.json`에 저장하고 최소 `{ batch_id, item_id, role, mode, completion_state, unfinished_reason, qa_status, covered_scope, report_path, testcase_path }`를 포함해. evidence는 `workspace/evidence/qa/Batch{N}/R{M}/...`에 현재 시도 기준으로 남겨. 직전 QA 상태: workspace/reports/.qa-last-run.json. 상세는 파일에 저장하고 반환은 경량 요약만 해"
+   - Agent(tester) 호출: `"[Batch{N}][R{M}][tester] browser re-verify {요청 항목 요약}"` + "시작 순서 고정: 1) `request-workboard.md` + `project-config.md` + 기획서 + 대응 `wf_*` / `desc_*` / `design_*` + 이전 이슈 + 수정 내역을 먼저 읽어 2) 수정된 부분 Playwright 재테스트 + 회귀 체크를 수행하고 3) claim/evidence + `.tester-state.json` + `.tester-last-run.json` + 자가점검까지 끝내기 전에는 완료처럼 말하지 마. blocked 재호출이면 `request-state.json`의 tester `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 체크 항목만 보완해. 이미 pass한 항목은 처음부터 다시 하지 마. claim 템플릿: `workspace/claims/Batch{N}/R{M}/tester.claim.json`에 저장하고 최소 `{ batch_id, item_id, role, completion_state, unfinished_reason, tester_status, executed_scope, report_path, playwright_result_path, playwright_log_path }`를 포함해. evidence는 `workspace/evidence/tester/Batch{N}/R{M}/...`에 현재 시도 기준으로 남겨. 직전 테스터 상태: workspace/testing/.tester-state.json + 직전 테스터 요약: workspace/reports/.tester-last-run.json. 상세는 파일에 저장하고 반환은 경량 요약만 해"
    - 3번으로
 6. 통과 기준 이상이어도 하네스가 QA / tester 반환값과 작업 보드의 `qa_status`, `tester_status`를 함께 확인한다
    - QA 반환이 짧거나 일부 잘렸더라도 `workspace/reports/.qa-last-run.json`과 `workspace/reports/D-qa-verification.md`가 최신이면 파일 우선 규칙으로 완료 여부를 판단한다
@@ -625,7 +631,7 @@
 - 서버 + DB + 프론트가 모두 실행 중이어야 한다.
 - DB는 빈 상태에서 시작한다.
 
-1. Agent(tester) 호출: "통합테스트 실행. project-config.md + 기획서 + TC 전체를 참조. DB 초기화 후 적용 가능한 핵심 E2E 시나리오를 순서대로 실행해. 결과를 workspace/reports/E-integration-test.md에 저장해. 상세는 파일에 저장하고 반환은 경량 요약만 해. 직전 상태는 workspace/testing/.tester-state.json, workspace/reports/.tester-last-run.json을 참조해"
+1. Agent(tester) 호출: `"[Batch{N}][R{M}][tester] integration test {요청 항목 요약}"` + "시작 순서 고정: 1) `project-config.md` + 기획서 + TC 전체 + 직전 tester 상태를 먼저 읽어 2) DB 초기화 후 핵심 E2E 시나리오를 순서대로 실행하고 3) `workspace/reports/E-integration-test.md` + claim/evidence + `.tester-state.json` + `.tester-last-run.json` + 자가점검까지 끝내기 전에는 완료처럼 말하지 마. blocked 재호출이면 `request-state.json`의 tester `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 체크 항목만 보완해. 이미 pass한 항목은 처음부터 다시 하지 마. claim 템플릿: `workspace/claims/Batch{N}/R{M}/tester.claim.json`에 저장하고 최소 `{ batch_id, item_id, role, completion_state, unfinished_reason, tester_status, executed_scope, report_path, playwright_result_path, playwright_log_path }`를 포함해. evidence는 `workspace/evidence/tester/Batch{N}/R{M}/...`에 현재 시도 기준으로 남겨. 직전 상태는 workspace/testing/.tester-state.json, workspace/reports/.tester-last-run.json을 참조해"
 2. 통합테스트 PASS율 100% + Blocker 0건 → 배포 가능
 3. 실패 있음 → 이슈 분류 후 해당 에이전트에게 수정 요청 → 재실행
 
