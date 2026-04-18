@@ -268,6 +268,7 @@ function saveState(state) {
   state.updated_at = nowIso();
   const statePath = resolvePath("workspace/planning/request-state.json");
   writeJsonFile(statePath, state);
+  writeLiveStatus(state);
 }
 
 function defaultDispatchState() {
@@ -276,6 +277,541 @@ function defaultDispatchState() {
     updated_at: nowIso(),
     entries: [],
   };
+}
+
+function elapsedLabel(fromIso) {
+  const value = Date.parse(fromIso || "");
+  if (Number.isNaN(value)) {
+    return null;
+  }
+
+  const seconds = Math.max(0, Math.floor((Date.now() - value) / 1000));
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remainSeconds = seconds % 60;
+  return `${minutes}m ${remainSeconds}s`;
+}
+
+function summarizeOpenDispatches(dispatchState) {
+  return (dispatchState.entries || [])
+    .filter((entry) => entry && !DISPATCH_TERMINAL_STATUSES.has(entry.status))
+    .map((entry) => ({
+      batch_id: entry.batch_id || null,
+      item_id: entry.item_id || null,
+      role: entry.role || null,
+      mode: entry.mode || null,
+      status: entry.status || null,
+      description: entry.description || null,
+      agent_id: entry.agent_id || null,
+      created_at: entry.created_at || null,
+      claimed_at: entry.claimed_at || null,
+      finished_at: entry.finished_at || null,
+      running_for: elapsedLabel(entry.claimed_at || entry.created_at || null),
+      stop_reason: entry.stop_reason || null,
+    }));
+}
+
+function summarizeBlockedItems(state) {
+  const results = [];
+
+  for (const batch of state.batches || []) {
+    for (const item of batch.items || []) {
+      for (const roleState of item.roles || []) {
+        if (roleState.status !== "blocked") {
+          continue;
+        }
+
+        results.push({
+          batch_id: batch.batch_id,
+          item_id: item.item_id,
+          role: roleState.role,
+          failed_check_ids: Array.isArray(roleState.failed_check_ids)
+            ? roleState.failed_check_ids
+            : [],
+          retry_scope: Array.isArray(roleState.retry_scope) ? roleState.retry_scope : [],
+          last_error: roleState.last_error || null,
+          last_updated_at: roleState.last_updated_at || null,
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
+function summarizeReviewGates(state) {
+  const results = [];
+
+  for (const batch of state.batches || []) {
+    for (const item of batch.items || []) {
+      if (!item.review_gate || item.review_gate.status === "idle") {
+        continue;
+      }
+
+      results.push({
+        batch_id: batch.batch_id,
+        item_id: item.item_id,
+        status: item.review_gate.status,
+        developer_review: item.review_gate.developer_review,
+        qa_review: item.review_gate.qa_review,
+        planner_response: item.review_gate.planner_response,
+        designer_response: item.review_gate.designer_response,
+        opened_at: item.review_gate.opened_at || null,
+        resolved_at: item.review_gate.resolved_at || null,
+      });
+    }
+  }
+
+  return results;
+}
+
+function summarizeRecentTasks(state) {
+  return [...(state.tasks || [])]
+    .sort((a, b) => Date.parse(b.last_event_at || "") - Date.parse(a.last_event_at || ""))
+    .slice(0, 8)
+    .map((entry) => ({
+      task_id: entry.task_id,
+      batch_id: entry.batch_id || null,
+      item_id: entry.item_id || null,
+      role: entry.role || null,
+      lifecycle: entry.lifecycle || null,
+      last_event_at: entry.last_event_at || null,
+      age: elapsedLabel(entry.last_event_at || null),
+      task_subject: entry.task_subject || null,
+    }));
+}
+
+function isRoleSatisfied(roleState) {
+  if (!roleState || roleState.required === false) {
+    return true;
+  }
+  return hasIssuedTicket(roleState);
+}
+
+function getCurrentBatch(state) {
+  const batches = Array.isArray(state.batches) ? state.batches : [];
+  if (batches.length === 0) {
+    return null;
+  }
+
+  if (state.current_batch_id) {
+    const matched = batches.find((entry) => entry.batch_id === state.current_batch_id);
+    if (matched) {
+      return matched;
+    }
+  }
+
+  const unresolved = [...batches]
+    .reverse()
+    .find((batch) =>
+      (batch.items || []).some((item) => {
+        const gate = ensureReviewGate(item);
+        return (
+          (item.roles || []).some((roleState) => !isRoleSatisfied(roleState)) ||
+          (gate.status !== "idle" && gate.status !== "resolved")
+        );
+      })
+    );
+
+  return unresolved || batches[batches.length - 1] || null;
+}
+
+function findLatestDispatchEntry(state, batchId, itemId, role) {
+  const dispatchState = loadDispatchState(state);
+  return (
+    [...(dispatchState.entries || [])]
+      .reverse()
+      .find(
+        (entry) =>
+          entry &&
+          entry.batch_id === batchId &&
+          entry.item_id === itemId &&
+          entry.role === role
+      ) || null
+  );
+}
+
+function inferRetryMode(state, batchId, item, roleName, fallbackMode) {
+  const latestDispatch = findLatestDispatchEntry(state, batchId, item.item_id, roleName);
+  return (latestDispatch && latestDispatch.mode) || fallbackMode || null;
+}
+
+function buildSuggestedDescription(batchId, itemId, role, mode, title) {
+  const summary = (title || itemId || "work item").trim();
+  if (mode) {
+    return `[${batchId}][${itemId}][${role}] ${mode}: ${summary}`;
+  }
+  return `[${batchId}][${itemId}][${role}] ${summary}`;
+}
+
+function summarizePendingItem(item) {
+  const reviewGate = ensureReviewGate(item);
+  const unresolvedRoles = (item.roles || [])
+    .filter((roleState) => !isRoleSatisfied(roleState))
+    .map((roleState) => ({
+      role: roleState.role,
+      status: roleState.status,
+      failed_check_ids: roleState.failed_check_ids || [],
+      retry_scope: roleState.retry_scope || [],
+      last_error: roleState.last_error || null,
+    }));
+
+  return {
+    item_id: item.item_id,
+    title: item.title,
+    unresolved_roles: unresolvedRoles,
+    review_gate: {
+      status: reviewGate.status,
+      developer_review: reviewGate.developer_review,
+      qa_review: reviewGate.qa_review,
+      planner_response: reviewGate.planner_response,
+      designer_response: reviewGate.designer_response,
+    },
+  };
+}
+
+function chooseNextActionForItem(state, batch, item) {
+  const title = item.title || item.item_id;
+  const reviewGate = ensureReviewGate(item);
+  const roleMap = new Map((item.roles || []).map((entry) => [entry.role, entry]));
+  const planner = roleMap.get("planner") || buildRoleState("planner", true);
+  const designer = roleMap.get("designer") || buildRoleState("designer", true);
+  const developer = roleMap.get("developer") || buildRoleState("developer", true);
+  const qa = roleMap.get("qa") || buildRoleState("qa", true);
+  const tester = roleMap.get("tester") || buildRoleState("tester", true);
+  const secretary = roleMap.get("secretary") || buildRoleState("secretary", true);
+
+  const retryRole = (item.roles || []).find(
+    (roleState) =>
+      roleState.required !== false &&
+      roleState.status === "blocked" &&
+      ((roleState.failed_check_ids && roleState.failed_check_ids.length > 0) ||
+        (roleState.retry_scope && roleState.retry_scope.length > 0))
+  );
+
+  if (retryRole) {
+    const fallbackMode =
+      retryRole.role === "planner"
+        ? retryRole.attempt > 0
+          ? "revise"
+          : "plan"
+        : retryRole.role === "designer"
+          ? "apply"
+          : retryRole.role === "developer"
+            ? "implement"
+            : retryRole.role === "qa"
+              ? "verify"
+              : null;
+    const mode = inferRetryMode(state, batch.batch_id, item, retryRole.role, fallbackMode);
+    return {
+      action: "dispatch",
+      reason: `blocked retry for ${retryRole.role}`,
+      batch_id: batch.batch_id,
+      item_id: item.item_id,
+      role: retryRole.role,
+      mode,
+      description: buildSuggestedDescription(batch.batch_id, item.item_id, retryRole.role, mode, title),
+      retry_scope: retryRole.retry_scope || [],
+      failed_check_ids: retryRole.failed_check_ids || [],
+    };
+  }
+
+  if (!isRoleSatisfied(planner)) {
+    const mode = planner.attempt > 0 ? "revise" : "plan";
+    return {
+      action: "dispatch",
+      reason: "planner ticket missing",
+      batch_id: batch.batch_id,
+      item_id: item.item_id,
+      role: "planner",
+      mode,
+      description: buildSuggestedDescription(batch.batch_id, item.item_id, "planner", mode, title),
+    };
+  }
+
+  if (!isRoleSatisfied(designer)) {
+    if (designer.status === "in_progress") {
+      return {
+        action: "branch_review_decision",
+        reason: "designer review returned; inspect review result and choose planner revise or designer apply",
+        batch_id: batch.batch_id,
+        item_id: item.item_id,
+        title,
+      };
+    }
+
+    const mode = designer.attempt > 0 ? "apply" : "review";
+    return {
+      action: "dispatch",
+      reason: mode === "review" ? "designer review pending" : "designer apply pending",
+      batch_id: batch.batch_id,
+      item_id: item.item_id,
+      role: "designer",
+      mode,
+      description: buildSuggestedDescription(batch.batch_id, item.item_id, "designer", mode, title),
+    };
+  }
+
+  if (reviewGate.status === "idle" || reviewGate.developer_review !== "done") {
+    return {
+      action: "dispatch",
+      reason: "developer planning review pending",
+      batch_id: batch.batch_id,
+      item_id: item.item_id,
+      role: "developer",
+      mode: "review",
+      description: buildSuggestedDescription(batch.batch_id, item.item_id, "developer", "review", title),
+    };
+  }
+
+  if (reviewGate.qa_review !== "done") {
+    return {
+      action: "dispatch",
+      reason: "qa planning review pending",
+      batch_id: batch.batch_id,
+      item_id: item.item_id,
+      role: "qa",
+      mode: "review",
+      description: buildSuggestedDescription(batch.batch_id, item.item_id, "qa", "review", title),
+    };
+  }
+
+  if (reviewGate.status === "open" && reviewGate.planner_response !== "done") {
+    return {
+      action: "dispatch",
+      reason: "planner revise pending after review loop",
+      batch_id: batch.batch_id,
+      item_id: item.item_id,
+      role: "planner",
+      mode: "revise",
+      description: buildSuggestedDescription(batch.batch_id, item.item_id, "planner", "revise", title),
+    };
+  }
+
+  if (reviewGate.status === "awaiting_design_sync" && reviewGate.designer_response !== "done") {
+    return {
+      action: "dispatch",
+      reason: "designer review sync pending",
+      batch_id: batch.batch_id,
+      item_id: item.item_id,
+      role: "designer",
+      mode: "apply",
+      description: buildSuggestedDescription(batch.batch_id, item.item_id, "designer", "apply", title),
+    };
+  }
+
+  if (!isRoleSatisfied(developer)) {
+    return {
+      action: "dispatch",
+      reason: "developer implement pending",
+      batch_id: batch.batch_id,
+      item_id: item.item_id,
+      role: "developer",
+      mode: "implement",
+      description: buildSuggestedDescription(batch.batch_id, item.item_id, "developer", "implement", title),
+    };
+  }
+
+  if (!isRoleSatisfied(qa)) {
+    const mode = developer.done_ticket.status === "issued" ? "verify" : "tc";
+    return {
+      action: "dispatch",
+      reason: mode === "tc" ? "qa testcase pending" : "qa verify pending",
+      batch_id: batch.batch_id,
+      item_id: item.item_id,
+      role: "qa",
+      mode,
+      description: buildSuggestedDescription(batch.batch_id, item.item_id, "qa", mode, title),
+    };
+  }
+
+  if (!isRoleSatisfied(tester)) {
+    return {
+      action: "dispatch",
+      reason: "tester execution pending",
+      batch_id: batch.batch_id,
+      item_id: item.item_id,
+      role: "tester",
+      mode: null,
+      description: buildSuggestedDescription(batch.batch_id, item.item_id, "tester", null, `integration test ${title}`),
+    };
+  }
+
+  if (!isRoleSatisfied(secretary)) {
+    return {
+      action: "dispatch",
+      reason: "secretary finalization pending",
+      batch_id: batch.batch_id,
+      item_id: item.item_id,
+      role: "secretary",
+      mode: null,
+      description: buildSuggestedDescription(batch.batch_id, item.item_id, "secretary", null, title),
+    };
+  }
+
+  return null;
+}
+
+function buildNextAction(state) {
+  const dispatchState = loadDispatchState(state);
+  const openDispatches = summarizeOpenDispatches(dispatchState);
+  if (openDispatches.length > 0) {
+    return {
+      action: "wait",
+      response_allowed: false,
+      reason: "open dispatch exists",
+      active_dispatch: openDispatches[0],
+    };
+  }
+
+  const batch = getCurrentBatch(state);
+  if (!batch) {
+    return {
+      action: "idle",
+      response_allowed: true,
+      reason: "no batch found",
+    };
+  }
+
+  for (const item of batch.items || []) {
+    const suggested = chooseNextActionForItem(state, batch, item);
+    if (suggested) {
+      return {
+        ...suggested,
+        response_allowed: false,
+      };
+    }
+  }
+
+  return {
+    action: "finalize",
+    response_allowed: true,
+    batch_id: batch.batch_id,
+    reason: "all required roles are done/skip and no open dispatch remains",
+  };
+}
+
+function buildLiveStatus(state) {
+  const dispatchState = loadDispatchState(state);
+  const openDispatches = summarizeOpenDispatches(dispatchState);
+  const activeDispatch = openDispatches[0] || null;
+  const nextAction = buildNextAction(state);
+  const currentBatch = getCurrentBatch(state);
+  const pendingItems = currentBatch ? (currentBatch.items || []).map(summarizePendingItem) : [];
+
+  return {
+    updated_at: nowIso(),
+    gate_mode: state.gate_mode || "enforce",
+    active_dispatch: activeDispatch,
+    open_dispatch_count: openDispatches.length,
+    open_dispatches: openDispatches,
+    review_gates: summarizeReviewGates(state),
+    blocked_items: summarizeBlockedItems(state),
+    recent_tasks: summarizeRecentTasks(state),
+    current_batch_id: currentBatch ? currentBatch.batch_id : null,
+    pending_items: pendingItems,
+    next_action: nextAction,
+    hint:
+      openDispatches.length > 0
+        ? "현재 백그라운드 에이전트가 동작 중일 수 있음. active_dispatch와 running_for를 확인."
+        : nextAction.response_allowed
+          ? "열린 dispatch 없음. 전체 완료 응답 가능."
+          : "열린 dispatch는 없지만 다음 단계가 남아 있음. next_action을 따라 내부 루프를 계속 진행해야 함.",
+  };
+}
+
+function writeLiveStatus(state) {
+  const payload = buildLiveStatus(state);
+  const jsonPath = resolvePath("workspace/reports/live-status.json");
+  const mdPath = resolvePath("workspace/reports/live-status.md");
+
+  writeJsonFile(jsonPath, payload);
+
+  const lines = [
+    "# Live Status",
+    "",
+    `- updated_at: ${payload.updated_at}`,
+    `- gate_mode: ${payload.gate_mode}`,
+    `- open_dispatch_count: ${payload.open_dispatch_count}`,
+    `- hint: ${payload.hint}`,
+    "",
+    "## Active Dispatch",
+  ];
+
+  if (payload.active_dispatch) {
+    lines.push(`- batch/item: ${payload.active_dispatch.batch_id}/${payload.active_dispatch.item_id}`);
+    lines.push(`- role/mode: ${payload.active_dispatch.role} / ${payload.active_dispatch.mode || "-"}`);
+    lines.push(`- status: ${payload.active_dispatch.status}`);
+    lines.push(`- running_for: ${payload.active_dispatch.running_for || "-"}`);
+    lines.push(`- description: ${payload.active_dispatch.description || "-"}`);
+    lines.push(`- agent_id: ${payload.active_dispatch.agent_id || "-"}`);
+  } else {
+    lines.push("- none");
+  }
+
+  lines.push("", "## Review Gates");
+  if (payload.review_gates.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const gate of payload.review_gates) {
+      lines.push(
+        `- ${gate.batch_id}/${gate.item_id}: ${gate.status} (dev=${gate.developer_review}, qa=${gate.qa_review}, planner=${gate.planner_response}, designer=${gate.designer_response})`
+      );
+    }
+  }
+
+  lines.push("", "## Blocked Items");
+  if (payload.blocked_items.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const item of payload.blocked_items) {
+      lines.push(
+        `- ${item.batch_id}/${item.item_id}/${item.role}: ${item.last_error || "blocked"}`
+      );
+      if (item.retry_scope.length > 0) {
+        lines.push(`  retry_scope: ${item.retry_scope.join(" | ")}`);
+      }
+    }
+  }
+
+  lines.push("", "## Next Action");
+  lines.push(`- action: ${payload.next_action.action}`);
+  lines.push(`- response_allowed: ${payload.next_action.response_allowed}`);
+  lines.push(`- reason: ${payload.next_action.reason || "-"}`);
+  if (payload.next_action.description) {
+    lines.push(`- description: ${payload.next_action.description}`);
+  }
+
+  lines.push("", "## Pending Items");
+  if (payload.pending_items.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const item of payload.pending_items) {
+      const unresolved = item.unresolved_roles
+        .map((entry) => `${entry.role}:${entry.status}`)
+        .join(", ");
+      lines.push(
+        `- ${item.item_id} (${item.title || "-"}) / unresolved=${unresolved || "none"} / review_gate=${item.review_gate.status}`
+      );
+    }
+  }
+
+  lines.push("", "## Recent Tasks");
+  if (payload.recent_tasks.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const task of payload.recent_tasks) {
+      lines.push(
+        `- ${task.batch_id || "-"}/${task.item_id || "-"}/${task.role || "-"}: ${task.lifecycle || "-"} (${task.age || "-"})`
+      );
+    }
+  }
+
+  ensureDir(mdPath);
+  fs.writeFileSync(mdPath, `${lines.join("\n")}\n`, "utf8");
 }
 
 function getDispatchPath(state = null) {
@@ -2413,6 +2949,27 @@ function handleEnsureStateItem(args) {
   });
 }
 
+function handleRefreshLiveStatus() {
+  const state = loadState();
+  writeLiveStatus(state);
+  printJson({
+    ok: true,
+    live_status_json: "workspace/reports/live-status.json",
+    live_status_md: "workspace/reports/live-status.md",
+    updated_at: nowIso(),
+  });
+}
+
+function handleNextAction() {
+  const state = loadState();
+  printJson({
+    ok: true,
+    updated_at: nowIso(),
+    current_batch_id: getCurrentBatch(state)?.batch_id || null,
+    next_action: buildNextAction(state),
+  });
+}
+
 function handleParseSubject(subject) {
   const parsed = parseTaskSubject(subject);
   if (!parsed) {
@@ -2536,6 +3093,8 @@ function printUsage() {
       "validator.js parse-subject \"[Batch8][R17][qa] review: short summary\"",
       "validator.js inspect-event path/to/payload.json",
       "validator.js issue-skip Batch8 R17 designer \"No UI-visible change\"",
+      "validator.js refresh-live-status",
+      "validator.js next-action",
       "validator.js check file_exists path/to/file",
       "validator.js check dir_has_entries path/to/dir",
       "validator.js check dir_has_entries_after path/to/dir 2026-04-16T00:00:00.000Z",
@@ -2595,6 +3154,12 @@ async function main() {
       return;
     case "ensure-state-item":
       handleEnsureStateItem(rest);
+      return;
+    case "refresh-live-status":
+      handleRefreshLiveStatus();
+      return;
+    case "next-action":
+      handleNextAction();
       return;
     default:
       printUsage();

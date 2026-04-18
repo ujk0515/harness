@@ -16,6 +16,7 @@
 - 루프 A 완료 → 즉시 루프 B 시작. 루프 B 완료 → 즉시 루프 C 시작. 예외 없음.
 - 에이전트 백그라운드 작업 완료 대기 중에도 사용자에게 중간 상태를 보고하지 않는다.
 - 사용자에게 전달하는 시점은 **전체 작업 완료 후 1번**뿐이다.
+- 백그라운드 진행 여부는 `workspace/reports/live-status.json`과 `workspace/reports/live-status.md`로 외부 확인 가능해야 한다.
 - 단, **루프 시작 전** 아래 3가지는 예외다.
   - 필수 항목(플랫폼, 기술 스택) 확인
   - 사전 검토 단계 질문
@@ -27,6 +28,19 @@
 - 통합테스트에서 실패 발견 → 실패 원인 분석 → 테스트 코드 문제면 테스트 코드 즉시 수정 후 재실행, 앱 버그면 개발자에게 즉시 수정 요청 후 재실행. 사용자 확인 없음.
 - 에이전트가 작업을 미완료하면 즉시 재호출하거나 다른 에이전트에게 넘긴다. 사용자에게 "미완료인데 어떻게 할까?" 묻지 않는다.
 - **하네스가 판단할 수 없는 경우에만 사용자에게 묻는다**: 요구사항 자체가 모호한 경우, 기술적으로 불가능한 경우, 외부 리소스(API 키, DB 설치 등)가 필요한 경우.
+
+### 하네스 오케스트레이션 루프 (필수)
+- 루프가 시작된 뒤 메인 하네스는 **에이전트 1개 응답 = 작업 종료**로 해석하지 않는다.
+- 각 에이전트 응답 직후, 루프 전환 직전, 사용자에게 답하기 직전에 반드시 아래 명령으로 다음 액션을 다시 계산한다.
+  - `node .claude/scripts/validator.js next-action`
+- `next-action.response_allowed = false`면 사용자에게 절대 답하지 않는다. 내부 루프를 계속 진행한다.
+- `next-action.action = wait`면 열린 dispatch가 있다는 뜻이다. 사용자 응답 없이 내부적으로 대기/재확인만 한다.
+- `next-action.action = dispatch`면 `description`에 나온 역할을 즉시 호출한다.
+- `next-action.action = branch_review_decision`면 사용자에게 묻지 말고 직전 리뷰 결과를 읽어 내부 분기한다.
+  - 디자이너 리뷰 결과가 수정 필요면 `planner revise`
+  - 수정 불필요면 `designer apply`
+- `next-action.action = finalize`일 때만 비서 최종 정리를 거쳐 사용자에게 1회 답한다.
+- `live-status.json` / `live-status.md`의 `next_action`은 외부 확인용 정본이다. 하네스가 멈춘 것처럼 보여도 `response_allowed = false`면 아직 완료가 아니다.
 
 ## 산출물 포맷 규칙
 
@@ -467,6 +481,8 @@
 | 테스터 상태/요약 | workspace/reports/.tester-last-run.json | 테스터 | 경량 반환 대체용 |
 | 에이전트 로그 | workspace/reports/agent-log.txt | 비서 | 접두사 없음 |
 | Hook 이벤트 로그 | workspace/reports/hook-events.jsonl | validator | Task/Subagent 실측 로그 |
+| 실시간 진행 상태(JSON) | workspace/reports/live-status.json | validator | 현재 열린 dispatch / review gate / blocked 항목 |
+| 실시간 진행 상태(MD) | workspace/reports/live-status.md | validator | 사람이 바로 보는 진행 현황 |
 | 최종 보고서 | workspace/reports/final-report.md | 비서 | 접두사 없음 |
 
 ### 규칙
@@ -636,12 +652,15 @@
 3. 실패 있음 → 이슈 분류 후 해당 에이전트에게 수정 요청 → 재실행
 
 ### 마무리
-1. 하네스는 최종 완료 전에 마지막으로 작업 보드를 읽고, 현재 요청 배치의 필수 항목이 모두 `done` 또는 `skipped`인지 확인한다
+1. 하네스는 최종 완료 전에 마지막으로 `node .claude/scripts/validator.js next-action`을 실행한다
+   - `response_allowed = false`면 절대 사용자에게 답하지 않고 내부 루프를 계속 진행한다
+   - `action = finalize`일 때만 아래 마무리 단계로 내려간다
+2. 하네스는 최종 완료 전에 마지막으로 작업 보드를 읽고, 현재 요청 배치의 필수 항목이 모두 `done` 또는 `skipped`인지 확인한다
    - 하나라도 `todo`, `in_progress`, `blocked`면 최종 완료를 선언하지 않고 해당 루프로 되돌린다
-2. 하네스가 전체 소요 시간, 에이전트별 토큰 사용량, 단계별 점수, `screen_id` 목록, variant 목록, Penpot Board 현황 집계를 함께 정리한다
+3. 하네스가 전체 소요 시간, 에이전트별 토큰 사용량, 단계별 점수, `screen_id` 목록, variant 목록, Penpot Board 현황 집계를 함께 정리한다
    - Penpot Board 현황 집계는 planner/designer 반환값, QA의 Board 존재 확인 결과, 최종 검증 결과를 종합해 만든다
-3. Agent(secretary) 호출: "secretary.md의 완료 리포트 포맷에 따라 정리해. 총 소요 시간: {X분}, 에이전트별 토큰: {내역}, 단계별 점수: {내역}, `screen_id` 목록: {내역}, variant 목록: {내역}, Penpot Board 현황: {내역}"
-4. 사용자에게 완료 리포트를 직접 출력한다 (파일 저장도 하지만, 화면에도 표시)
+4. Agent(secretary) 호출: "secretary.md의 완료 리포트 포맷에 따라 정리해. 총 소요 시간: {X분}, 에이전트별 토큰: {내역}, 단계별 점수: {내역}, `screen_id` 목록: {내역}, variant 목록: {내역}, Penpot Board 현황: {내역}"
+5. 사용자에게 완료 리포트를 직접 출력한다 (파일 저장도 하지만, 화면에도 표시)
 
 ## VOC / 업데이트 흐름
 
