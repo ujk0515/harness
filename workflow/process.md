@@ -34,6 +34,7 @@
 - 각 에이전트 응답 직후, 루프 전환 직전, 사용자에게 답하기 직전에 반드시 아래 명령으로 다음 액션을 다시 계산한다.
   - `node .claude/scripts/validator.js next-action`
 - `next-action.response_allowed = false`면 사용자에게 절대 답하지 않는다. 내부 루프를 계속 진행한다.
+- `next-action.action = halt`면 **하드 스톱 미니 프로세스**로 간주한다. 이 경우에만 사용자에게 상황을 설명하고 답을 기다린다.
 - `next-action.action = wait`면 열린 dispatch가 있다는 뜻이다. 사용자 응답 없이 내부적으로 대기/재확인만 한다.
 - `next-action.action = dispatch`면 `description`에 나온 역할을 즉시 호출한다.
 - `next-action.action = branch_review_decision`면 사용자에게 묻지 말고 직전 리뷰 결과를 읽어 내부 분기한다.
@@ -41,6 +42,18 @@
   - 수정 불필요면 `designer apply`
 - `next-action.action = finalize`일 때만 비서 최종 정리를 거쳐 사용자에게 1회 답한다.
 - `live-status.json` / `live-status.md`의 `next_action`은 외부 확인용 정본이다. 하네스가 멈춘 것처럼 보여도 `response_allowed = false`면 아직 완료가 아니다.
+
+### 하드 스톱 미니 프로세스 (필수)
+- 아래 3가지는 일반 루프와 분리된 **하드 스톱 상태**로 다룬다.
+  - 기획 부족/모호: `planning_clarification`
+  - Penpot/외부 도구 준비 불가: `penpot_unavailable`
+  - 재시도/턴 한도 초과: `retry_limit_exhausted`
+- 하드 스톱은 문장으로만 말하지 말고 상태에도 기록한다.
+  - 열기: `node .claude/scripts/validator.js hold-open <code> "<reason>" '<details_json>'`
+  - 해제: `node .claude/scripts/validator.js hold-resolve <code>`
+- 열린 hold가 있으면 `next-action`은 항상 `halt`를 반환해야 한다.
+- 하드 스톱 중에는 루프 A/B/C/D를 진행하지 않는다.
+- 사용자 답변/환경 복구/한도 조정으로 hold를 해제한 뒤에만 다음 액션 계산으로 복귀한다.
 
 ## 산출물 포맷 규칙
 
@@ -96,6 +109,7 @@
 
 ### 시작 흐름
 1. 필수 항목이 빠져 있으면 → 빠진 항목만 안내하고 입력을 요청한다. **멈춘다.**
+   - 이때 `hold-open planning_clarification` 또는 `hold-open missing_requirements`로 상태에 기록한다.
 2. 필수 항목이 채워지면 → **사전 검토 단계**로 진입한다.
 
 ### 사전 검토 단계
@@ -139,6 +153,7 @@
 #### 흐름
 1. 하네스가 피드백 + 질문을 전달한다
 2. **사용자가 답할 때까지 멈춘다. 절대 자동 진행하지 않는다.**
+   - 이때 `hold-open planning_clarification`로 상태에 기록한다.
 3. 사용자가 답하면 → **요청 분해 + 작업 보드 생성** → 벤치마킹 + 루프 A 시작
 
 추출한 설정은 workspace/planning/project-config.md에 저장하고, 모든 에이전트 호출 시 참조한다.
@@ -430,6 +445,7 @@
   - 브라우저 Penpot 플러그인 연결 상태
   - `project-config.md`의 프로젝트명으로 Penpot 페이지를 만들거나 찾을 수 있는 상태인지
 - 위 조건 중 하나라도 만족하지 않으면 **루프 A를 시작하지 않고 준비 필요 상태로 멈춘다**
+  - 이때 `hold-open penpot_unavailable`로 상태에 기록한다.
 - 이 단계는 루프 시작 전 예외 단계이므로, 필요 시 사용자에게 연결 상태만 간단히 알릴 수 있다
 
 ## 파일 경로 레지스트리

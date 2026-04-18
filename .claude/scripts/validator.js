@@ -109,8 +109,21 @@ function defaultState() {
       dispatch: "workspace/planning/.dispatch.json",
     },
     current_batch_id: null,
+    holds: [],
     tasks: [],
     batches: [],
+  };
+}
+
+function defaultHoldState(code = "unknown", reason = null) {
+  return {
+    code,
+    status: "open",
+    reason,
+    source: "harness",
+    details: {},
+    opened_at: nowIso(),
+    resolved_at: null,
   };
 }
 
@@ -159,6 +172,21 @@ function normalizeTaskEntry(entry) {
     role: entry && "role" in entry ? entry.role : null,
     lifecycle: entry && entry.lifecycle ? entry.lifecycle : "created",
     last_event_at: entry && entry.last_event_at ? entry.last_event_at : nowIso(),
+  };
+}
+
+function normalizeHoldEntry(entry) {
+  const next = entry && typeof entry === "object" ? entry : {};
+  return {
+    ...defaultHoldState(next.code || "unknown", "reason" in next ? next.reason : null),
+    ...next,
+    code: next.code || "unknown",
+    status: next.status === "resolved" ? "resolved" : "open",
+    reason: "reason" in next ? next.reason : null,
+    source: next.source || "harness",
+    details: next.details && typeof next.details === "object" ? next.details : {},
+    opened_at: next.opened_at || nowIso(),
+    resolved_at: next.status === "resolved" ? next.resolved_at || nowIso() : null,
   };
 }
 
@@ -256,9 +284,13 @@ function loadState() {
   if (!Array.isArray(state.tasks)) {
     state.tasks = [];
   }
+  if (!Array.isArray(state.holds)) {
+    state.holds = [];
+  }
   if (!Array.isArray(state.batches)) {
     state.batches = [];
   }
+  state.holds = state.holds.map(normalizeHoldEntry);
   state.tasks = state.tasks.map(normalizeTaskEntry);
   state.batches = state.batches.map(normalizeBatch);
   return state;
@@ -656,6 +688,17 @@ function chooseNextActionForItem(state, batch, item) {
 }
 
 function buildNextAction(state) {
+  const openHolds = getOpenHolds(state);
+  if (openHolds.length > 0) {
+    const hold = openHolds[0];
+    return {
+      action: "halt",
+      response_allowed: true,
+      reason: hold.reason || hold.code,
+      hold,
+    };
+  }
+
   const dispatchState = loadDispatchState(state);
   const openDispatches = summarizeOpenDispatches(dispatchState);
   if (openDispatches.length > 0) {
@@ -708,6 +751,7 @@ function buildLiveStatus(state) {
     active_dispatch: activeDispatch,
     open_dispatch_count: openDispatches.length,
     open_dispatches: openDispatches,
+    open_holds: getOpenHolds(state),
     review_gates: summarizeReviewGates(state),
     blocked_items: summarizeBlockedItems(state),
     recent_tasks: summarizeRecentTasks(state),
@@ -750,6 +794,15 @@ function writeLiveStatus(state) {
     lines.push(`- agent_id: ${payload.active_dispatch.agent_id || "-"}`);
   } else {
     lines.push("- none");
+  }
+
+  lines.push("", "## Hard Stops");
+  if (payload.open_holds.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const hold of payload.open_holds) {
+      lines.push(`- ${hold.code}: ${hold.reason || "-"}`);
+    }
   }
 
   lines.push("", "## Review Gates");
@@ -1538,6 +1591,40 @@ function reopenRoleState(roleState, reason = null) {
   roleState.last_updated_at = nowIso();
 }
 
+function getOpenHolds(state) {
+  return (state.holds || []).filter((entry) => entry.status !== "resolved");
+}
+
+function upsertHold(state, code, reason, details = {}, source = "harness") {
+  const holds = Array.isArray(state.holds) ? state.holds : [];
+  const existing = holds.find((entry) => entry.code === code && entry.status !== "resolved");
+  if (existing) {
+    existing.reason = reason;
+    existing.details = details && typeof details === "object" ? details : {};
+    existing.source = source;
+    existing.opened_at = existing.opened_at || nowIso();
+    existing.resolved_at = null;
+    return existing;
+  }
+
+  const next = defaultHoldState(code, reason);
+  next.details = details && typeof details === "object" ? details : {};
+  next.source = source;
+  holds.push(next);
+  state.holds = holds;
+  return next;
+}
+
+function resolveHold(state, code) {
+  const holds = Array.isArray(state.holds) ? state.holds : [];
+  for (const entry of holds) {
+    if (entry.code === code && entry.status !== "resolved") {
+      entry.status = "resolved";
+      entry.resolved_at = nowIso();
+    }
+  }
+}
+
 function buildRetryScope(failedChecks) {
   return failedChecks.map((entry) => `retry ${entry.id}: ${entry.label}`);
 }
@@ -1883,6 +1970,17 @@ async function handleTaskCreated() {
     context.roleState.skip_ticket.status !== "issued" &&
     context.roleState.attempt >= retryLimit
   ) {
+    upsertHold(
+      state,
+      "retry_limit_exhausted",
+      `Retry limit reached for ${meta.batch_id}/${meta.item_id}/${meta.role}.`,
+      {
+        batch_id: meta.batch_id,
+        item_id: meta.item_id,
+        role: meta.role,
+      },
+      "validator"
+    );
     upsertTaskRegistry(state, payload, meta, "completion_blocked");
     saveState(state);
     stopTeammate(
@@ -2012,6 +2110,19 @@ async function handleTaskCompleted() {
     saveState(state);
 
     if (context.roleState.attempt >= retryLimit) {
+      upsertHold(
+        state,
+        "retry_limit_exhausted",
+        `Retry limit reached for ${meta.batch_id}/${meta.item_id}/${meta.role}.`,
+        {
+          batch_id: meta.batch_id,
+          item_id: meta.item_id,
+          role: meta.role,
+          failures,
+        },
+        "validator"
+      );
+      saveState(state);
       stopTeammate(
         `Retry limit reached for ${meta.batch_id}/${meta.item_id}/${meta.role}. Missing: ${summarizeFailures(failures)}`
       );
@@ -2091,6 +2202,18 @@ async function handleTeammateIdle() {
     context.roleState.skip_ticket.status !== "issued" &&
     context.roleState.attempt >= retryLimit
   ) {
+    upsertHold(
+      state,
+      "retry_limit_exhausted",
+      `Retry limit reached for ${activeTask.batch_id}/${activeTask.item_id}/${activeTask.role}.`,
+      {
+        batch_id: activeTask.batch_id,
+        item_id: activeTask.item_id,
+        role: activeTask.role,
+      },
+      "validator"
+    );
+    saveState(state);
     stopTeammate(
       `Retry limit reached for ${activeTask.batch_id}/${activeTask.item_id}/${activeTask.role}. Escalate to user.`
     );
@@ -2278,6 +2401,17 @@ async function handlePreToolUseAgent() {
       }
 
       if (context.roleState.attempt >= retryLimit) {
+        upsertHold(
+          state,
+          "retry_limit_exhausted",
+          `Retry limit reached for ${meta.batch_id}/${meta.item_id}/${meta.role}.`,
+          {
+            batch_id: meta.batch_id,
+            item_id: meta.item_id,
+            role: meta.role,
+          },
+          "validator"
+        );
         blockedReason = `Retry limit reached for ${meta.batch_id}/${meta.item_id}/${meta.role}. Escalate to user.`;
         return;
       }
@@ -2960,6 +3094,61 @@ function handleRefreshLiveStatus() {
   });
 }
 
+function handleHoldOpen(args) {
+  const [code, reason, ...detailParts] = args;
+  if (!code || !reason) {
+    printJson({
+      ok: false,
+      error: "usage: validator.js hold-open code reason [details_json]",
+    });
+    process.exit(1);
+  }
+
+  let details = {};
+  if (detailParts.length > 0) {
+    const raw = detailParts.join(" ").trim();
+    if (raw) {
+      try {
+        details = JSON.parse(raw);
+      } catch (error) {
+        printJson({
+          ok: false,
+          error: `invalid details_json: ${error.message}`,
+        });
+        process.exit(1);
+      }
+    }
+  }
+
+  const state = loadState();
+  const hold = upsertHold(state, code, reason, details, "harness");
+  saveState(state);
+  printJson({
+    ok: true,
+    hold,
+  });
+}
+
+function handleHoldResolve(args) {
+  const [code] = args;
+  if (!code) {
+    printJson({
+      ok: false,
+      error: "usage: validator.js hold-resolve code",
+    });
+    process.exit(1);
+  }
+
+  const state = loadState();
+  resolveHold(state, code);
+  saveState(state);
+  printJson({
+    ok: true,
+    code,
+    open_holds: getOpenHolds(state),
+  });
+}
+
 function handleNextAction() {
   const state = loadState();
   printJson({
@@ -3094,6 +3283,8 @@ function printUsage() {
       "validator.js inspect-event path/to/payload.json",
       "validator.js issue-skip Batch8 R17 designer \"No UI-visible change\"",
       "validator.js refresh-live-status",
+      "validator.js hold-open planning_clarification \"Need more requirements\" '{\"questions\":[\"로그인 방식?\"]}'",
+      "validator.js hold-resolve planning_clarification",
       "validator.js next-action",
       "validator.js check file_exists path/to/file",
       "validator.js check dir_has_entries path/to/dir",
@@ -3157,6 +3348,12 @@ async function main() {
       return;
     case "refresh-live-status":
       handleRefreshLiveStatus();
+      return;
+    case "hold-open":
+      handleHoldOpen(rest);
+      return;
+    case "hold-resolve":
+      handleHoldResolve(rest);
       return;
     case "next-action":
       handleNextAction();
