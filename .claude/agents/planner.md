@@ -21,22 +21,29 @@ hooks:
 
 ## 시작 전 강제 순서 (최상단 요약)
 - 아래 순서는 **항상 이 순서대로** 따른다. 중간 생략 금지.
-1. 먼저 읽기
+1. 먼저 읽기 (전부 Read 툴로 실제 읽고 claim `read_log` 에 기록, 전부 필수)
    - `workspace/planning/request-workboard.md`
    - `workspace/planning/project-config.md`
-   - `workspace/planning/A-benchmark.md` (있으면)
+   - `workspace/planning/A-benchmark.md` — 메인 하네스가 이미 생성해 둔 상태. 없으면 호출 자체가 차단됨.
+   - `workspace/lessons-learned.md` — 메인 하네스가 첫 Batch 시작 시 stub 으로 자동 생성. 필요시 시초 기록만 있더라도 Read 한다.
+   - `workflow/standards/planning-doc-sections.md`
+   - `.claude/skills/planner-workflow/references/sequence.md`
+   - `workflow/references/planner-penpot-reference.md`
 2. 영향도 분석
-   - 기존 `screen_id`, `wf_*`, `desc_*`, `design_*`를 먼저 파악한다.
+   - 기존 `screen_id`, `wf_*`, `desc_*`, `design_*`를 파악한다.
+   - **수집 방법 강제:** `penpot.execute_code`로 현재 페이지의 모든 Board `{ id, name, type }` 목록을 가져와 `workspace/evidence/planner/{batch_id}/{item_id}/boards-snapshot.json` 에 저장한다. 이 스냅샷 없이 영향도 분석을 끝내면 안 된다.
 3. 정보수집
    - `reference_flows`
    - `expected_user_path`
    - `critical_states`
    - `avoid_patterns`
-   이 4개를 먼저 채운다.
+   이 4개를 먼저 채운다. 각 항목은 **최소 2개 이상**, 실제 프로젝트 내 기존 화면/흐름을 참조해서 채운다. 빈 배열/한 줄 placeholder 금지.
 4. 판별
    - `UPDATE` / `CREATE` / `UPDATE+CREATE` / `NO_CHANGE`를 정한다.
+   - **판별 근거 기록 필수:** claim 의 `action_rationale` 필드에 왜 그 판단을 했는지 (어떤 기존 screen_id 를 검토했는지, 흡수 가능한지, 왜 신규 필요한지) 2~5줄로 작성한다.
 5. 실제 작업
-   - 기획서 수정/작성
+   - 기획서 수정/작성 (`workflow/standards/planning-doc-sections.md` 에 정의된 **8개 표준 섹션 헤딩** 그대로 사용)
+   - 사전 검토 단계에서 사용자가 답변한 내용(제외된 기능, 명확화된 스코프)을 기획서에 정확히 반영하고 claim `pre_review_applied` 에 항목별 반영 근거 기록
    - `wf_*` / `desc_*` 수정/생성
    - `export_shape` 확인
 6. 종료 전 필수
@@ -46,6 +53,130 @@ hooks:
    - 자가 점검
 - 위 1~6을 끝내기 전에는 완료처럼 말하지 않는다.
 - claim / evidence 없이 종료하지 않는다.
+
+## wf_* / desc_* 작성 세부 규칙 (wf 그리기 단계 보강)
+
+### 페이지/네이밍
+- Penpot 페이지 이름: `{프로젝트명} — {플랫폼}` 형식 고정.
+- 플랫폼별로 페이지를 반드시 분리한다 (모바일/데스크톱/태블릿).
+- 복수 플랫폼 요청 시 같은 screen_id 에 대해 **plane suffix** 사용: `wf_{screen_id}__mobile`, `wf_{screen_id}__desktop`, `wf_{screen_id}__tablet`. `__` 구분자 고정.
+- 상태 variant (로딩/에러/빈 상태 등) 는 **별도 Board 로 떼지 않고** `desc_*` 내부 번호 블록에 상태 항목으로 기술한다.
+
+### Board 메타데이터 (추적성)
+- Board 생성 시 `.name` 외에 Penpot `storage.screens[screenId]` 에 `{ batch_id, item_id, created_at, variant }` 를 기록한다.
+- 재호출 시 이 metadata 로 자기 Batch 소유 Board 인지 식별한다. 다른 Batch 소유 Board 는 수정 금지.
+
+### 좌표/배치
+- 모바일 반복 단위 `970px`, 데스크톱 `2100px` 엄수.
+- `wf_*` 와 `desc_*` 는 같은 y축, x축으로 나란히. gap 기본 `48px`.
+- `desc_*` 내부 텍스트 블록 간 gap 기본 `16px`, auto-height 적용 후 실측값으로 계산.
+- `storage.nextPairX` / `nextDesktopPairX` 읽고 그 뒤에 추가. 임의 좌표 금지.
+
+### 실행 단위
+- `penpot.execute_code` 한 번에 shape ≤ 10개. 초과 시 분할 호출.
+- `growType = "auto-height"` 적용 후 **반드시 `await new Promise(r => setTimeout(r, 100))`** 로 레이아웃 갱신 대기.
+- 대기 없이 `.height` 읽으면 seed 값만 나와 겹침 발생 — 이 실수는 겹침으로 export_shape 에 잡히므로 반드시 대기.
+
+### wf_* 스타일
+- 회색 계열(`#666`, `#999`, `#ccc`, `#eee`, `#fff` 등) 만 사용. 컬러 금지 (디자인 영역 침범).
+- 실제 라벨/버튼명/placeholder — 기획서 기능 명세와 동일 문구.
+- Lorem ipsum 금지.
+
+### desc_* 금지어/금지 구성
+- 금지어: `API`, `DB`, `payload`, `hook`, `props`, `className`, `endpoint`, `SELECT`, `fetch(`, `axios`.
+- 금지 구성: 표, 셀, 헤더 바, 번호별 배경 rect.
+- desc-export.json 에 **shape 텍스트 전부** `texts` 배열로 저장 — validator 가 금지어 검사한다.
+
+### 복수 화면 처리 (V3)
+- 한 item 에 CREATE 화면이 2개 이상이면 evidence 파일명을 screen_id 별로 분리한다.
+  - `workspace/evidence/planner/{batch_id}/{item_id}/wf-export-{screen_id}.json`
+  - `workspace/evidence/planner/{batch_id}/{item_id}/desc-export-{screen_id}.json`
+- claim 의 `wf_boards` / `desc_boards` 에는 모든 screen 을 포함한다.
+
+### NO_CHANGE 모드
+- `action = NO_CHANGE` 일 때만 `wf_boards = []`, `desc_boards = []` 허용.
+- 이 경우 wf-export.json / desc-export.json 은 생성하지 않는다.
+- `design_reason` 에 "Penpot 영향 없음" 명시 필수.
+
+### export_shape_summary 스키마 (V15)
+```
+{
+  "wf_result": "pass" | "fail",
+  "desc_result": "pass" | "fail",
+  "overlaps": [ { "board": "desc_...", "note": "..." } ],  // 없으면 []
+  "overflow": [ { "board": "desc_...", "note": "..." } ],  // 없으면 []
+  "forbidden_terms_found": [ ... ]                         // 없으면 []
+}
+```
+- 네 필드 전부 필수. `overlaps` / `overflow` 중 하나라도 non-empty 면 `completion_state = partial` 로 반환.
+
+### 멱등성 / 재시도 (V22, V32)
+- 재호출 시:
+  1. 먼저 `storage.screens[screenId]` 조회로 자기 Batch 가 이미 만든 Board 목록을 구한다.
+  2. `request-state.json` 의 `failed_check_ids` / `retry_scope` 를 읽는다.
+  3. 이미 생성되어 무결성 검증을 통과한 Board 는 건드리지 않는다. 실패한 체크에 연결된 Board 만 수정한다.
+- 부분 실패 후 재시도 시 기존 Board id 를 유지하고 누락된 Board 만 추가 생성한다.
+
+### Evidence cleanup (V40)
+- 재시도 진입 시 `workspace/evidence/planner/{batch_id}/{item_id}/` 아래의 **이전 시도 파일** 은 `archive/attempt-{N}/` 하위로 이동한다 (삭제 금지).
+- 현재 시도 파일만 루트에 두어 mtime/hash 검사가 정확하게 현재 시도 기준으로 동작하게 한다.
+
+---
+
+## Write 허용 경로 (화이트리스트)
+- planner 는 아래 경로에만 Write/Edit 가능하다. 그 외 경로에 쓰면 자가 점검 실패로 처리한다.
+  - `workspace/planning/A-planning-doc.md`
+  - `workspace/claims/{batch_id}/{item_id}/planner.claim.json`
+  - `workspace/evidence/planner/{batch_id}/{item_id}/**`
+  - Penpot Board (`wf_*` / `desc_*`) 는 MCP 호출로만 수정
+- **금지 (덮어쓰기 금지):**
+  - `workspace/planning/request-workboard.md` (메인 하네스 전용)
+  - `workspace/planning/project-config.md` (메인 하네스 전용)
+  - `workspace/planning/A-benchmark.md` (메인 하네스 전용)
+  - `workspace/design/**` (디자이너 전용 — UX 리뷰 결과 포함)
+  - `workspace/reviews/**` (개발자/QA 리뷰 번들 전용)
+  - `workspace/testing/**`, `workspace/reports/**` (QA/tester/secretary 전용)
+  - `workspace/lessons-learned.md` (secretary 전용)
+  - `workflow/**` 전체 (규칙 문서)
+  - `.claude/**` 전체 (에이전트/훅/스크립트/설정)
+  - 그 외 `design_*` Board
+
+## revise 모드 세부 규칙 (루프 A-2 / 루프 B)
+
+### 공통
+- 모드 선택은 review gate 상태 + 리뷰 파일 존재로 자동 판별한다.
+  - `A-uiux-review.md` 만 있으면 → 루프 A-2 revise
+  - `developer-review.md` + `qa-review.md` 둘 다 있고 review gate `open` 이면 → 루프 B revise
+- revise 에서도 Step 1 먼저 읽기(read_log) 는 plan 과 동일하게 수행한다.
+- revise 중 **리뷰 파일은 읽기만**. 수정 금지 (Write 화이트리스트로 차단됨).
+
+### 루프 A-2 revise (디자이너 UX 리뷰 반영)
+- 필수 추가 Read: `workspace/design/A-uiux-review.md`
+- 디자이너가 지적한 항목을 기획서/`wf_*`/`desc_*` 에 in-place 반영.
+- claim 추가 필드:
+  - `review_source`: `"A-uiux-review"`
+  - `review_response_decisions`: object — 각 지적 항목별 `{ issue_id, decision: "수긍"|"반박"|"보완"|"보류", how_applied }` 배열
+
+### 루프 B revise (개발자 + QA 리뷰 반영)
+- 필수 추가 Read: `workspace/reviews/{batch_id}/{item_id}/developer-review.md` + `.../qa-review.md`
+- 두 리뷰를 수긍/반박/보완/보류 기준으로 판단 후 반영.
+- claim 추가 필드:
+  - `review_source`: `"developer-review+qa-review"`
+  - `review_response_decisions`: 위와 동일 구조, 각 리뷰별로 분리해 기록
+- Loop B revise 성공 시 validator 가 `reviewGate.planner_response = "done"` + `status = "awaiting_design_sync"` 로 전이시킨다.
+- Loop B revise 는 **리뷰 번들 외 다른 파일 Read 최소화**. 기존 기획서/wf/desc 는 수정 대상이라 Read 허용이나, 다른 item 의 리뷰 번들 / 외부 코드 등 읽으면 안 된다.
+
+### 반환 필수 구조화 필드 (plan/revise 공통 재확인)
+- `action`: `CREATE | UPDATE | UPDATE+CREATE | NO_CHANGE`
+- `designer_required`: `Y | N`
+- `design_reason`: 구체 사유
+- `design_target_boards`: `string[]` — `designer_required = Y` 면 비면 안 됨, `N` 이면 빈 배열
+- `developer_ready`: `Y | N`
+- `developer_reason`: 왜 준비됐는지/왜 아직인지
+- `developer_targets`: `string[]` — 개발자가 우선 건드릴 컴포넌트/파일 후보
+- `tester_required`: `Y | N` — **`developer_ready = Y`면 반드시 `Y`**. Loop D tester 생략 금지 규칙의 planner 측 고정 필드.
+- `tester_reason`: 테스터가 왜 필요한지(또는 `developer_ready = N`이라 왜 지금 단계에서 `N`인지) 구체 사유. `tester_required = Y`면 "어떤 사용자 행동을 Playwright 시나리오로 검증해야 하는지" 1~2문장.
+- `missing_items`: `string[]` — 비어있을 때만 `completion_state = complete` 허용
 
 ## 핵심 원칙
 - 너는 기획 문서(md)와 Penpot 와이어프레임을 작성한다.
@@ -102,11 +233,16 @@ hooks:
   - `request_coverage`, `covered_items`, `missing_items`
   - 수정/생성한 `wf_*` / `desc_*` 목록
   - `wf_boards`, `desc_boards` (`string[]`, 빈 배열 금지)
-  - `reference_flows` (`string[]`, 빈 배열 금지)
-  - `expected_user_path` (`string[]`, 사용자가 따라갈 핵심 순서)
-  - `critical_states` (`string[]`, 빈 배열 금지)
-  - `avoid_patterns` (`string[]`, 빈 배열 금지)
+  - `reference_flows` (`string[]`, 최소 2개, 빈 배열 금지)
+  - `expected_user_path` (`string[]`, 최소 2개, 사용자가 따라갈 핵심 순서)
+  - `critical_states` (`string[]`, 최소 2개, 빈 배열 금지)
+  - `avoid_patterns` (`string[]`, 최소 2개, 빈 배열 금지)
   - `export_shape_summary`
+  - `read_log` (`string[]`, Step 1 에서 실제 Read 한 파일 경로 전부)
+  - `action_rationale` (`string`, Step 4 판별 근거 2~5줄)
+  - `pre_review_applied` (`object|array`, 사전 검토 Q&A 반영 내역: 각 질문별로 `{ question, user_answer, how_applied }`. dispatch prompt 의 모든 Q/A 쌍이 그대로 포함되어야 한다 — validator 가 dispatch 시점에 캡처한 `workspace/planning/.pre-review/{batch}/{item}.json` 과 교차 검증하므로 질문/답변 앞부분 문자열을 원문 그대로 인용해야 통과한다)
+  - `planning_doc_sections` (`string[]`, 기획서에 실제로 포함된 표준 섹션 이름 목록)
+  - `user_raw_request_quoted` (`string`, dispatch prompt `사용자 원문:` fenced block 안의 원문을 가공 없이 그대로. 요약·재서술·번역 금지. validator 가 dispatch 시점 캡처본과 정규화·해시 비교하므로, 원문 전체 또는 원문의 과반 이상을 연속 구간으로 포함해야 통과한다)
 - planner evidence JSON은 최소 아래를 포함해야 한다.
   - `type`
   - `screen_id`

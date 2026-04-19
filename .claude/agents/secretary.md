@@ -28,6 +28,8 @@ color: cyan
   - `completion_state`, `unfinished_reason`
   - 작성한 보고서 경로
   - 요약한 루프/항목 범위
+  - `lessons_learned_applied`: `Y | N` — 이번 루프에서 `workspace/lessons-learned.md` 에 교훈을 append 했으면 `Y`, 실수 없음으로 판단해 건너뛰면 `N`
+  - `lessons_learned_reason`: append 했으면 **어떤 분류/어떤 교훈**인지 1~2줄, 건너뛰었으면 "실수 없음" 판단 근거(루프 중 재시도/blocked/rejected 0건 같은 팩트)
 - secretary는 `done ticket`을 직접 만들지 않는다. validator가 체크리스트를 검사해 `secretary.done.json`을 발급한다.
 - claim과 evidence는 **이번 시도에서 새로 갱신된 파일**이어야 한다. 이전 시도의 남은 파일은 통과로 인정되지 않는다.
 - `done`은 claim/evidence를 남기고 자가 점검을 통과한 경우에만 사용한다.
@@ -52,7 +54,10 @@ color: cyan
    - `남은 이슈`
    - `작업 보드 상태 요약 (overall_status + 역할별 status)`
 5. 없는 정보를 추측하지 않는다. 전달받지 못한 값은 `없음` 또는 `미전달`로 기록한다
-6. 기록 결과를 짧게 반환한다
+6. **Lessons Learned 누적 (필수):** 이번 루프에서 발견된 실수/주의사항이 있으면 `workspace/lessons-learned.md` 하단에 아래 포맷으로 append 한다. 다음 Batch planner 호출 시 이 파일이 첨부되어 같은 실수를 반복하지 않게 한다.
+   - 포맷: `### [Batch{N}][R{M}] <짧은 제목>` / `- 발생일:` / `- 분류: CREATE 남발 / 섹션 누락 / 요구사항 누락 / 기타` / `- 내용:` / `- 교훈:`
+   - 실수가 없으면 append 하지 않는다 (노이즈 금지)
+7. 기록 결과를 짧게 반환한다
 
 ### 작업 완료 정리 요청을 받았을 때
 

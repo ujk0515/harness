@@ -39,27 +39,66 @@
       },
       {
         "id": "planner_process_no_wf_desc_removal",
-        "label": "planner revise transcript에 wf_/desc_* 삭제/재할당 호출 없음",
-        "when_mode": "revise",
+        "label": "planner transcript에 wf_/desc_* 삭제/재할당 호출 없음 (plan+revise 모두)",
         "command": "node .claude/scripts/validator.js check transcript_no_wf_desc_removal {agent_transcript_path}"
       },
       {
         "id": "planner_snapshot_before_exists",
-        "label": "planner revise 시작 전 wf/desc snapshot-before evidence가 현재 시도 이후 갱신됨",
-        "when_mode": "revise",
+        "label": "planner 시작 전 wf/desc snapshot-before evidence가 현재 시도 이후 갱신됨 (plan+revise 모두)",
         "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/planner/{batch_id}/{item_id}/wf-desc-snapshot-before.json {dispatch_created_at}"
       },
       {
         "id": "planner_snapshot_after_exists",
-        "label": "planner revise 종료 후 wf/desc snapshot-after evidence가 현재 시도 이후 갱신됨",
-        "when_mode": "revise",
+        "label": "planner 종료 후 wf/desc snapshot-after evidence가 현재 시도 이후 갱신됨 (plan+revise 모두)",
         "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/planner/{batch_id}/{item_id}/wf-desc-snapshot-after.json {dispatch_created_at}"
       },
       {
         "id": "planner_snapshot_preserves_wf_desc",
-        "label": "planner revise 전후 snapshot 비교 시 기존 wf_/desc_* Board id가 유지됨",
-        "when_mode": "revise",
+        "label": "planner 전후 snapshot 비교 시 기존 wf_/desc_* Board id가 유지됨 (plan+revise 모두, plan 초기 실행 제외)",
         "command": "node .claude/scripts/validator.js check snapshot_preserves_ids workspace/evidence/planner/{batch_id}/{item_id}/wf-desc-snapshot-before.json workspace/evidence/planner/{batch_id}/{item_id}/wf-desc-snapshot-after.json"
+      },
+      {
+        "id": "planner_wf_desc_pair_match",
+        "label": "planner claim의 wf_boards와 desc_boards가 같은 screen_id로 쌍 매칭됨",
+        "command": "node .claude/scripts/validator.js check wf_desc_pair_match workspace/claims/{batch_id}/{item_id}/planner.claim.json"
+      },
+      {
+        "id": "planner_board_name_matches_item",
+        "label": "planner claim wf_boards가 wf_ prefix + screen_id 형식 유지",
+        "command": "node .claude/scripts/validator.js check board_name_matches_item workspace/claims/{batch_id}/{item_id}/planner.claim.json {item_id}"
+      },
+      {
+        "id": "planner_wf_boards_match_planning_doc",
+        "label": "planner claim wf_boards의 screen_id가 A-planning-doc.md 화면 목록에 포함됨",
+        "when_action_not": "NO_CHANGE",
+        "command": "node .claude/scripts/validator.js check wf_boards_match_planning_doc workspace/claims/{batch_id}/{item_id}/planner.claim.json workspace/planning/A-planning-doc.md"
+      },
+      {
+        "id": "planner_multi_screen_evidence_exists",
+        "label": "복수 화면인 경우 각 screen_id 별 wf-export/desc-export 파일이 모두 존재",
+        "when_action_not": "NO_CHANGE",
+        "command": "node .claude/scripts/validator.js check multi_screen_evidence_exists workspace/claims/{batch_id}/{item_id}/planner.claim.json workspace/evidence/planner/{batch_id}/{item_id}"
+      },
+      {
+        "id": "planner_retry_preserves_board_ids",
+        "label": "재시도 시 이전 시도의 Board id가 현재 시도 snapshot-after에 모두 유지됨",
+        "when_action_not": "NO_CHANGE",
+        "command": "node .claude/scripts/validator.js check retry_preserves_board_ids workspace/evidence/planner/{batch_id}/{item_id}"
+      },
+      {
+        "id": "planner_desc_no_forbidden_terms",
+        "label": "desc-export evidence의 texts에 구현 용어(API/DB/hook/props/className 등) 없음",
+        "command": "node .claude/scripts/validator.js check desc_no_forbidden_terms workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json"
+      },
+      {
+        "id": "planner_action_consistency",
+        "label": "planner claim action 값과 wf/desc_boards 개수 일관성 (NO_CHANGE일 때만 빈 배열 허용)",
+        "command": "node .claude/scripts/validator.js check action_consistency workspace/claims/{batch_id}/{item_id}/planner.claim.json"
+      },
+      {
+        "id": "planner_export_shape_summary_schema",
+        "label": "claim.export_shape_summary에 필수 키(wf_result, desc_result, overlaps, overflow) 포함",
+        "command": "node .claude/scripts/validator.js check json_object_has_keys workspace/claims/{batch_id}/{item_id}/planner.claim.json export_shape_summary wf_result desc_result overlaps overflow"
       },
       {
         "id": "planner_claim_recent",
@@ -74,11 +113,13 @@
       {
         "id": "planner_claim_has_wf_boards",
         "label": "planner claim 안의 wf_boards가 비어 있지 않음",
+        "when_action_not": "NO_CHANGE",
         "command": "node .claude/scripts/validator.js check json_array_nonempty workspace/claims/{batch_id}/{item_id}/planner.claim.json wf_boards"
       },
       {
         "id": "planner_claim_has_desc_boards",
         "label": "planner claim 안의 desc_boards가 비어 있지 않음",
+        "when_action_not": "NO_CHANGE",
         "command": "node .claude/scripts/validator.js check json_array_nonempty workspace/claims/{batch_id}/{item_id}/planner.claim.json desc_boards"
       },
       {
@@ -107,43 +148,274 @@
         "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/planner.claim.json export_shape_summary"
       },
       {
+        "id": "planner_claim_has_read_log",
+        "label": "planner claim 안의 read_log 배열이 4개 이상",
+        "command": "node .claude/scripts/validator.js check json_array_min_size workspace/claims/{batch_id}/{item_id}/planner.claim.json read_log 4"
+      },
+      {
+        "id": "planner_claim_has_action_rationale",
+        "label": "planner claim 안의 action_rationale 존재",
+        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/planner.claim.json action_rationale"
+      },
+      {
+        "id": "planner_claim_has_pre_review_applied",
+        "label": "planner claim 안의 pre_review_applied 존재",
+        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/planner.claim.json pre_review_applied"
+      },
+      {
+        "id": "planner_claim_has_user_raw_request",
+        "label": "planner claim 안의 user_raw_request_quoted 존재",
+        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/planner.claim.json user_raw_request_quoted"
+      },
+      {
+        "id": "planner_claim_user_raw_matches_dispatch",
+        "label": "planner claim user_raw_request_quoted가 dispatch 당시 캡처된 원문과 일치",
+        "when_mode": "plan",
+        "command": "node .claude/scripts/validator.js check user_raw_request_match workspace/claims/{batch_id}/{item_id}/planner.claim.json workspace/planning/.pre-review/{batch_id}/{item_id}.json"
+      },
+      {
+        "id": "planner_claim_pre_review_qa_applied",
+        "label": "planner claim pre_review_applied가 dispatch 캡처된 모든 Q&A 쌍을 포함",
+        "when_mode": "plan",
+        "command": "node .claude/scripts/validator.js check pre_review_qa_applied workspace/claims/{batch_id}/{item_id}/planner.claim.json workspace/planning/.pre-review/{batch_id}/{item_id}.json"
+      },
+      {
+        "id": "planner_claim_has_planning_doc_sections",
+        "label": "planner claim 안의 planning_doc_sections 배열이 비어 있지 않음",
+        "command": "node .claude/scripts/validator.js check json_array_nonempty workspace/claims/{batch_id}/{item_id}/planner.claim.json planning_doc_sections"
+      },
+      {
+        "id": "planner_reference_flows_min2",
+        "label": "planner claim reference_flows 최소 2개",
+        "command": "node .claude/scripts/validator.js check json_array_min_size workspace/claims/{batch_id}/{item_id}/planner.claim.json reference_flows 2"
+      },
+      {
+        "id": "planner_expected_user_path_min2",
+        "label": "planner claim expected_user_path 최소 2개",
+        "command": "node .claude/scripts/validator.js check json_array_min_size workspace/claims/{batch_id}/{item_id}/planner.claim.json expected_user_path 2"
+      },
+      {
+        "id": "planner_critical_states_min2",
+        "label": "planner claim critical_states 최소 2개",
+        "command": "node .claude/scripts/validator.js check json_array_min_size workspace/claims/{batch_id}/{item_id}/planner.claim.json critical_states 2"
+      },
+      {
+        "id": "planner_avoid_patterns_min2",
+        "label": "planner claim avoid_patterns 최소 2개",
+        "command": "node .claude/scripts/validator.js check json_array_min_size workspace/claims/{batch_id}/{item_id}/planner.claim.json avoid_patterns 2"
+      },
+      {
+        "id": "planner_boards_snapshot_recent",
+        "label": "planner boards-snapshot evidence가 현재 시도 이후 갱신됨",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/planner/{batch_id}/{item_id}/boards-snapshot.json {dispatch_created_at}"
+      },
+      {
+        "id": "planner_planning_doc_has_all_sections",
+        "label": "A-planning-doc.md에 표준 8개 섹션 전부 포함(비어 있지 않음)",
+        "command": "node .claude/scripts/validator.js check planning_doc_sections workspace/planning/A-planning-doc.md"
+      },
+      {
+        "id": "planner_reference_flows_item_quality",
+        "label": "planner claim reference_flows 각 항목 최소 15자",
+        "command": "node .claude/scripts/validator.js check json_array_item_min_length workspace/claims/{batch_id}/{item_id}/planner.claim.json reference_flows 15"
+      },
+      {
+        "id": "planner_expected_user_path_item_quality",
+        "label": "planner claim expected_user_path 각 항목 최소 10자",
+        "command": "node .claude/scripts/validator.js check json_array_item_min_length workspace/claims/{batch_id}/{item_id}/planner.claim.json expected_user_path 10"
+      },
+      {
+        "id": "planner_critical_states_item_quality",
+        "label": "planner claim critical_states 각 항목 최소 10자",
+        "command": "node .claude/scripts/validator.js check json_array_item_min_length workspace/claims/{batch_id}/{item_id}/planner.claim.json critical_states 10"
+      },
+      {
+        "id": "planner_avoid_patterns_item_quality",
+        "label": "planner claim avoid_patterns 각 항목 최소 15자",
+        "command": "node .claude/scripts/validator.js check json_array_item_min_length workspace/claims/{batch_id}/{item_id}/planner.claim.json avoid_patterns 15"
+      },
+      {
+        "id": "planner_reference_flows_no_dup",
+        "label": "planner claim reference_flows 중복 없음",
+        "command": "node .claude/scripts/validator.js check json_array_no_duplicates workspace/claims/{batch_id}/{item_id}/planner.claim.json reference_flows"
+      },
+      {
+        "id": "planner_avoid_patterns_no_dup",
+        "label": "planner claim avoid_patterns 중복 없음",
+        "command": "node .claude/scripts/validator.js check json_array_no_duplicates workspace/claims/{batch_id}/{item_id}/planner.claim.json avoid_patterns"
+      },
+      {
+        "id": "planner_reference_flows_item_quality",
+        "label": "planner claim reference_flows 각 항목 품질 (placeholder/vague 금지 + 고유 단어 3개 + 접두부 중복 금지)",
+        "command": "node .claude/scripts/validator.js check json_array_item_quality workspace/claims/{batch_id}/{item_id}/planner.claim.json reference_flows"
+      },
+      {
+        "id": "planner_expected_user_path_item_quality_rule",
+        "label": "planner claim expected_user_path 각 항목 품질 (placeholder/vague 금지 + 고유 단어 3개 + 접두부 중복 금지)",
+        "command": "node .claude/scripts/validator.js check json_array_item_quality workspace/claims/{batch_id}/{item_id}/planner.claim.json expected_user_path"
+      },
+      {
+        "id": "planner_critical_states_item_quality_rule",
+        "label": "planner claim critical_states 각 항목 품질 (placeholder/vague 금지 + 고유 단어 3개 + 접두부 중복 금지)",
+        "command": "node .claude/scripts/validator.js check json_array_item_quality workspace/claims/{batch_id}/{item_id}/planner.claim.json critical_states"
+      },
+      {
+        "id": "planner_avoid_patterns_item_quality_rule",
+        "label": "planner claim avoid_patterns 각 항목 품질 (placeholder/vague 금지 + 고유 단어 3개 + 접두부 중복 금지)",
+        "command": "node .claude/scripts/validator.js check json_array_item_quality workspace/claims/{batch_id}/{item_id}/planner.claim.json avoid_patterns"
+      },
+      {
+        "id": "planner_workboard_item_has_quote",
+        "label": "작업 보드 item 행에 사용자 원문 인용 포함(최소 20자)",
+        "command": "node .claude/scripts/validator.js check workboard_item_has_quote workspace/planning/request-workboard.md {item_id}"
+      },
+      {
+        "id": "planner_planning_doc_hash_changed",
+        "label": "A-planning-doc.md 내용 해시가 이전 시도와 다름(touch 우회 방지)",
+        "command": "node .claude/scripts/validator.js check hash_record_and_compare workspace/planning/A-planning-doc.md workspace/evidence/planner/{batch_id}/{item_id}/content-hashes.json"
+      },
+      {
+        "id": "planner_claim_hash_changed",
+        "label": "planner.claim.json 내용 해시가 이전 시도와 다름(touch 우회 방지)",
+        "command": "node .claude/scripts/validator.js check hash_record_and_compare workspace/claims/{batch_id}/{item_id}/planner.claim.json workspace/evidence/planner/{batch_id}/{item_id}/content-hashes.json"
+      },
+      {
+        "id": "planner_transcript_step_order",
+        "label": "planner transcript에서 6단계 순서(workboard→sequence→snapshot→doc→wf→claim) 지켜짐",
+        "command": "node .claude/scripts/validator.js check transcript_step_order {agent_transcript_path}"
+      },
+      {
+        "id": "planner_write_whitelist_respected",
+        "label": "planner가 상위 설정/규칙/리뷰 파일에 Write/Edit하지 않음",
+        "command": "node .claude/scripts/validator.js check transcript_no_forbidden_writes {agent_transcript_path} workspace/planning/request-workboard\\.md workspace/planning/project-config\\.md workspace/planning/A-benchmark\\.md workspace/lessons-learned\\.md ^workflow/ ^workspace/design/ ^workspace/reviews/ ^workspace/testing/ ^workspace/reports/ ^\\.claude/"
+      },
+      {
+        "id": "planner_revise_a2_read_ux_review",
+        "label": "루프 A-2 revise: A-uiux-review.md Read 호출 존재",
+        "when_mode": "revise",
+        "command": "node .claude/scripts/validator.js check transcript_read_if_exists {agent_transcript_path} workspace/design/A-uiux-review.md"
+      },
+      {
+        "id": "planner_revise_b_read_dev_review",
+        "label": "루프 B revise: developer-review.md Read 호출 존재",
+        "when_mode": "revise",
+        "command": "node .claude/scripts/validator.js check transcript_read_if_exists {agent_transcript_path} workspace/reviews/{batch_id}/{item_id}/developer-review.md"
+      },
+      {
+        "id": "planner_revise_b_read_qa_review",
+        "label": "루프 B revise: qa-review.md Read 호출 존재",
+        "when_mode": "revise",
+        "command": "node .claude/scripts/validator.js check transcript_read_if_exists {agent_transcript_path} workspace/reviews/{batch_id}/{item_id}/qa-review.md"
+      },
+      {
+        "id": "planner_claim_has_designer_required",
+        "label": "planner claim 안의 designer_required 존재 (Y|N)",
+        "command": "node .claude/scripts/validator.js check json_field_matches workspace/claims/{batch_id}/{item_id}/planner.claim.json designer_required ^(Y|N)$"
+      },
+      {
+        "id": "planner_claim_has_design_reason",
+        "label": "planner claim 안의 design_reason 존재",
+        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/planner.claim.json design_reason"
+      },
+      {
+        "id": "planner_claim_has_developer_ready",
+        "label": "planner claim 안의 developer_ready 존재 (Y|N)",
+        "command": "node .claude/scripts/validator.js check json_field_matches workspace/claims/{batch_id}/{item_id}/planner.claim.json developer_ready ^(Y|N)$"
+      },
+      {
+        "id": "planner_claim_has_tester_required",
+        "label": "planner claim 안의 tester_required 존재 (Y|N)",
+        "command": "node .claude/scripts/validator.js check json_field_matches workspace/claims/{batch_id}/{item_id}/planner.claim.json tester_required ^(Y|N)$"
+      },
+      {
+        "id": "planner_claim_has_tester_reason",
+        "label": "planner claim 안의 tester_reason 존재 (10자 이상)",
+        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/planner.claim.json tester_reason"
+      },
+      {
+        "id": "planner_claim_tester_required_consistency",
+        "label": "developer_ready=Y면 tester_required도 Y여야 함 (Loop D tester 생략 금지)",
+        "command": "node .claude/scripts/validator.js check tester_required_consistency workspace/claims/{batch_id}/{item_id}/planner.claim.json"
+      },
+      {
+        "id": "planner_claim_missing_items_empty",
+        "label": "planner claim missing_items가 완료 판정 조건 — 비어 있음",
+        "command": "node .claude/scripts/validator.js check json_array_empty workspace/claims/{batch_id}/{item_id}/planner.claim.json missing_items"
+      },
+      {
+        "id": "planner_claim_revise_has_review_decisions",
+        "label": "revise 모드에서 claim.review_response_decisions 배열 존재 (비어 있지 않음)",
+        "when_mode": "revise",
+        "command": "node .claude/scripts/validator.js check json_array_nonempty workspace/claims/{batch_id}/{item_id}/planner.claim.json review_response_decisions"
+      },
+      {
+        "id": "planner_claim_revise_has_review_source",
+        "label": "revise 모드에서 claim.review_source 존재",
+        "when_mode": "revise",
+        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/planner.claim.json review_source"
+      },
+      {
+        "id": "planner_claim_request_coverage_valid",
+        "label": "claim.request_coverage가 유효한 형식(0~1 숫자 | 0~100% 문자 | {covered,total})",
+        "command": "node .claude/scripts/validator.js check request_coverage_valid workspace/claims/{batch_id}/{item_id}/planner.claim.json"
+      },
+      {
+        "id": "planner_request_coverage_cross_check",
+        "label": "작업 보드 item 원문 토큰의 80% 이상이 기획서 '기능 명세' 섹션에 포함됨 (자가신고 대체)",
+        "when_action_not": "NO_CHANGE",
+        "command": "node .claude/scripts/validator.js check request_coverage_cross_check workspace/planning/request-workboard.md {item_id} workspace/planning/A-planning-doc.md"
+      },
+      {
+        "id": "planner_claim_no_deferral_phrases",
+        "label": "claim에 '후속 루프', '나중에', '일단 개발 먼저' 등 유예 표현 없음",
+        "command": "node .claude/scripts/validator.js check no_deferral_phrases workspace/claims/{batch_id}/{item_id}/planner.claim.json"
+      },
+      {
         "id": "planner_wf_export_recent",
         "label": "planner wf-export evidence가 현재 시도 이후 갱신됨",
+        "when_action_not": "NO_CHANGE",
         "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json {dispatch_created_at}"
       },
       {
         "id": "planner_wf_export_type",
         "label": "planner wf-export evidence의 type = wf_export",
+        "when_action_not": "NO_CHANGE",
         "command": "node .claude/scripts/validator.js check json_field_equals workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json type wf_export"
       },
       {
         "id": "planner_wf_export_board_id",
         "label": "planner wf-export evidence의 board_id 존재",
+        "when_action_not": "NO_CHANGE",
         "command": "node .claude/scripts/validator.js check json_field_truthy workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json board_id"
       },
       {
         "id": "planner_wf_export_board_name",
         "label": "planner wf-export evidence의 board_name이 wf_로 시작",
+        "when_action_not": "NO_CHANGE",
         "command": "node .claude/scripts/validator.js check json_field_matches workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json board_name ^wf_"
       },
       {
         "id": "planner_desc_export_recent",
         "label": "planner desc-export evidence가 현재 시도 이후 갱신됨",
+        "when_action_not": "NO_CHANGE",
         "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json {dispatch_created_at}"
       },
       {
         "id": "planner_desc_export_type",
         "label": "planner desc-export evidence의 type = desc_export",
+        "when_action_not": "NO_CHANGE",
         "command": "node .claude/scripts/validator.js check json_field_equals workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json type desc_export"
       },
       {
         "id": "planner_desc_export_board_id",
         "label": "planner desc-export evidence의 board_id 존재",
+        "when_action_not": "NO_CHANGE",
         "command": "node .claude/scripts/validator.js check json_field_truthy workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json board_id"
       },
       {
         "id": "planner_desc_export_board_name",
         "label": "planner desc-export evidence의 board_name이 desc_로 시작",
+        "when_action_not": "NO_CHANGE",
         "command": "node .claude/scripts/validator.js check json_field_matches workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json board_name ^desc_"
       },
       {
@@ -434,6 +706,21 @@
         "id": "final_report_has_summary",
         "label": "최종 보고서에 요약 섹션 존재",
         "command": "node .claude/scripts/validator.js check file_contains workspace/reports/final-report.md 요약"
+      },
+      {
+        "id": "secretary_claim_has_lessons_learned_applied",
+        "label": "secretary claim 안의 lessons_learned_applied 존재 (Y|N)",
+        "command": "node .claude/scripts/validator.js check json_field_matches workspace/claims/{batch_id}/{item_id}/secretary.claim.json lessons_learned_applied ^(Y|N)$"
+      },
+      {
+        "id": "secretary_claim_has_lessons_learned_reason",
+        "label": "secretary claim 안의 lessons_learned_reason 존재 (applied=N일 때도 왜 생략했는지 명시)",
+        "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/secretary.claim.json lessons_learned_reason"
+      },
+      {
+        "id": "secretary_lessons_learned_appended_if_applied",
+        "label": "lessons_learned_applied=Y면 lessons-learned.md가 현재 시도 이후 갱신되고 [Batch][R] 헤딩 포함",
+        "command": "node .claude/scripts/validator.js check lessons_learned_append_if_applied workspace/claims/{batch_id}/{item_id}/secretary.claim.json workspace/lessons-learned.md {dispatch_created_at}"
       },
       {
         "id": "secretary_state_done",

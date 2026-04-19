@@ -50,7 +50,15 @@ function ensureDir(filePath) {
 
 function writeJsonFile(filePath, payload) {
   ensureDir(filePath);
-  fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  const fullPath = resolvePath(filePath);
+  const tmpPath = `${fullPath}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  try {
+    fs.renameSync(tmpPath, fullPath);
+  } catch (e) {
+    try { fs.unlinkSync(tmpPath); } catch (_) {}
+    throw e;
+  }
 }
 
 function appendJsonLine(filePath, payload) {
@@ -136,8 +144,14 @@ function defaultTicketState() {
   };
 }
 
+const REVIEW_GATE_SCHEMA_VERSION = "2.0.0";
+
 function defaultReviewGateState() {
   return {
+    schema_version: REVIEW_GATE_SCHEMA_VERSION,
+    batch_id: null,
+    item_id: null,
+    scope: "item",
     status: "idle",
     opened_at: null,
     resolved_at: null,
@@ -145,6 +159,8 @@ function defaultReviewGateState() {
     qa_review: "todo",
     planner_response: "todo",
     designer_response: "todo",
+    planner_response_history: [],
+    designer_response_history: [],
   };
 }
 
@@ -262,8 +278,16 @@ function normalizeBatch(batch) {
 function loadState() {
   const statePath = resolvePath("workspace/planning/request-state.json");
   if (!fs.existsSync(statePath)) {
+    const fingerprintPath = resolvePath("workspace/planning/.request-state.fingerprint");
+    if (fs.existsSync(fingerprintPath)) {
+      process.stderr.write(
+        `[validator] request-state.json missing but fingerprint exists — state may have been deleted. Refusing to auto-reset.\n`
+      );
+      process.exit(2);
+    }
     const state = defaultState();
     writeJsonFile(statePath, state);
+    writeJsonFile(fingerprintPath, { created_at: nowIso() });
     return state;
   }
 
@@ -1165,6 +1189,666 @@ function checkJsonArrayNonEmpty(filePath, fieldPath) {
   return Array.isArray(value) && value.length > 0;
 }
 
+function checkJsonArrayMinSize(filePath, fieldPath, minSize) {
+  if (!checkFileExists(filePath)) return false;
+  const target = parseJsonFile(filePath);
+  const value = getByPath(target, fieldPath);
+  return Array.isArray(value) && value.length >= minSize;
+}
+
+function checkJsonObjectHasKeys(filePath, fieldPath, requiredKeys) {
+  if (!checkFileExists(filePath)) return false;
+  const target = parseJsonFile(filePath);
+  const value = getByPath(target, fieldPath);
+  if (!value || typeof value !== "object") return false;
+  return requiredKeys.every((k) => Object.prototype.hasOwnProperty.call(value, k));
+}
+
+const PLANNING_DOC_REQUIRED_SECTIONS = [
+  "## 프로젝트 개요",
+  "## 우선순위",
+  "## 기능 명세",
+  "## 비범위",
+  "## 제약/의존성",
+  "## 화면 목록",
+  "## 흐름도",
+  "## API / DB 개요",
+];
+
+function checkJsonArrayItemMinLength(filePath, fieldPath, minLen) {
+  if (!checkFileExists(filePath)) return false;
+  const target = parseJsonFile(filePath);
+  const value = getByPath(target, fieldPath);
+  if (!Array.isArray(value) || value.length === 0) return false;
+  return value.every((v) => typeof v === "string" && v.trim().length >= minLen);
+}
+
+function checkJsonArrayNoDuplicates(filePath, fieldPath) {
+  if (!checkFileExists(filePath)) return false;
+  const target = parseJsonFile(filePath);
+  const value = getByPath(target, fieldPath);
+  if (!Array.isArray(value)) return false;
+  const normalized = value.map((v) => String(v).trim().toLowerCase());
+  return new Set(normalized).size === normalized.length;
+}
+
+function checkWorkboardItemHasQuote(filePath, itemId) {
+  if (!checkFileExists(filePath)) return false;
+  const content = fs.readFileSync(resolvePath(filePath), "utf8");
+  const lines = content.split("\n");
+  const rowRegex = new RegExp(`\\|\\s*${itemId}\\s*\\|`);
+  const row = lines.find((l) => rowRegex.test(l));
+  if (!row) return false;
+  const cells = row.split("|").map((c) => c.trim());
+  const requestCell = cells[2] || "";
+  if (requestCell.length < 20) return false;
+  return /["'『「]/.test(requestCell) || requestCell.includes("원문:");
+}
+
+// checkHashRecordAndCompare — 최초 실행과 재시도에서 다르게 작동한다:
+//   1) 최초 실행 (log 파일 없음 or 해당 key 없음): prevHash=undefined, 현재 해시를 기록하고 true(pass) 반환.
+//      → 첫 시도는 "비교 대상 없음"이므로 pass. 대신 이후 비교용 해시가 확실히 남는다.
+//   2) 재시도 (이전 해시 존재):
+//      - 파일 내용이 바뀌었으면 prevHash !== currentHash → true(pass). 로그 갱신.
+//      - 파일 내용이 그대로면 prevHash === currentHash → false(fail). touch 우회 방지.
+// side effect: 항상 최신 해시를 로그에 기록 (pass/fail 모두 기록).
+// 재시도인데 정말 내용이 같으면 fail — "재시도는 내용을 바꿔야 한다"는 의도된 동작.
+function checkHashRecordAndCompare(targetFilePath, hashLogPath) {
+  if (!checkFileExists(targetFilePath)) return false;
+  const fullTarget = resolvePath(targetFilePath);
+  const fullLog = resolvePath(hashLogPath);
+  const crypto = require("crypto");
+  const content = fs.readFileSync(fullTarget);
+  const currentHash = crypto.createHash("sha256").update(content).digest("hex");
+  let log = {};
+  if (fs.existsSync(fullLog)) {
+    try {
+      log = JSON.parse(fs.readFileSync(fullLog, "utf8"));
+    } catch (e) {
+      log = {};
+    }
+  }
+  const prevHash = log[targetFilePath];
+  log[targetFilePath] = currentHash;
+  log.last_updated = new Date().toISOString();
+  fs.mkdirSync(path.dirname(fullLog), { recursive: true });
+  fs.writeFileSync(fullLog, JSON.stringify(log, null, 2));
+  return prevHash !== currentHash;
+}
+
+function checkWfDescPairMatch(claimPath) {
+  if (!checkFileExists(claimPath)) return false;
+  const claim = parseJsonFile(claimPath);
+  const wf = Array.isArray(claim.wf_boards) ? claim.wf_boards : [];
+  const desc = Array.isArray(claim.desc_boards) ? claim.desc_boards : [];
+  const action = String(claim.action || "").toUpperCase();
+  if (action === "NO_CHANGE") return true;
+  const wfIds = wf.map((s) => String(s).replace(/^wf_/, "")).sort();
+  const descIds = desc.map((s) => String(s).replace(/^desc_/, "")).sort();
+  if (wfIds.length === 0 || descIds.length === 0) return false;
+  if (wfIds.length !== descIds.length) return false;
+  return wfIds.every((id, i) => id === descIds[i]);
+}
+
+function checkBoardNameMatchesItem(claimPath, itemId) {
+  if (!checkFileExists(claimPath)) return false;
+  const claim = parseJsonFile(claimPath);
+  const action = String(claim.action || "").toUpperCase();
+  if (action === "NO_CHANGE") return true;
+  const wf = Array.isArray(claim.wf_boards) ? claim.wf_boards : [];
+  if (wf.length === 0) return false;
+  const normalizedItem = String(itemId).toLowerCase();
+  return wf.every((name) => {
+    const n = String(name).toLowerCase();
+    if (!n.startsWith("wf_")) return false;
+    return n.length > 3;
+  });
+}
+
+function checkDescNoForbiddenTerms(evidencePath) {
+  if (!checkFileExists(evidencePath)) return false;
+  const evidence = parseJsonFile(evidencePath);
+  const texts = Array.isArray(evidence.texts) ? evidence.texts : [];
+  const forbidden = [
+    /\bAPI\b/i,
+    /\bDB\b/i,
+    /payload/i,
+    /\bhook\b/i,
+    /\bprops\b/i,
+    /className/i,
+    /endpoint/i,
+    /SELECT\s/i,
+    /fetch\(/i,
+    /axios/i,
+  ];
+  for (const t of texts) {
+    const s = String(t);
+    if (forbidden.some((re) => re.test(s))) return false;
+  }
+  return true;
+}
+
+function checkMultiScreenEvidenceExists(claimPath, evidenceDir) {
+  if (!checkFileExists(claimPath)) return false;
+  const claim = parseJsonFile(claimPath);
+  const action = String(claim.action || "").toUpperCase();
+  if (action === "NO_CHANGE") return true;
+  const wf = Array.isArray(claim.wf_boards) ? claim.wf_boards : [];
+  if (wf.length === 0) return false;
+  const screens = wf.map((n) => String(n).replace(/^wf_/, ""));
+  const fullDir = resolvePath(evidenceDir);
+  if (screens.length === 1) {
+    const singleWf = path.join(fullDir, "wf-export.json");
+    const perScreenWf = path.join(fullDir, `wf-export-${screens[0]}.json`);
+    const singleDesc = path.join(fullDir, "desc-export.json");
+    const perScreenDesc = path.join(fullDir, `desc-export-${screens[0]}.json`);
+    return (
+      (fs.existsSync(singleWf) || fs.existsSync(perScreenWf)) &&
+      (fs.existsSync(singleDesc) || fs.existsSync(perScreenDesc))
+    );
+  }
+  return screens.every((sid) => {
+    const wfFile = path.join(fullDir, `wf-export-${sid}.json`);
+    const descFile = path.join(fullDir, `desc-export-${sid}.json`);
+    return fs.existsSync(wfFile) && fs.existsSync(descFile);
+  });
+}
+
+function extractScreenIdsFromPlanningDoc(docPath) {
+  if (!checkFileExists(docPath)) return [];
+  const content = fs.readFileSync(resolvePath(docPath), "utf8");
+  const lines = content.split("\n");
+  const startIdx = lines.findIndex((l) => l.trim() === "## 화면 목록");
+  if (startIdx === -1) return [];
+  let endIdx = lines.length;
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    if (/^##\s/.test(lines[i])) {
+      endIdx = i;
+      break;
+    }
+  }
+  const body = lines.slice(startIdx + 1, endIdx);
+  const ids = new Set();
+  for (const line of body) {
+    const tokens = line.split(/[\s|,`]+/);
+    for (const t of tokens) {
+      const clean = t.trim();
+      if (!clean) continue;
+      if (/^[a-z][a-z0-9_-]{2,}$/.test(clean) && !/^(table|screen_id|이름|screen|id|목록)$/i.test(clean)) {
+        ids.add(clean);
+      }
+    }
+  }
+  return [...ids];
+}
+
+function checkWfBoardsMatchPlanningDoc(claimPath, docPath) {
+  if (!checkFileExists(claimPath)) return false;
+  const claim = parseJsonFile(claimPath);
+  const action = String(claim.action || "").toUpperCase();
+  if (action === "NO_CHANGE") return true;
+  const wf = Array.isArray(claim.wf_boards) ? claim.wf_boards : [];
+  if (wf.length === 0) return false;
+  const docIds = new Set(extractScreenIdsFromPlanningDoc(docPath));
+  if (docIds.size === 0) return false;
+  return wf.every((name) => {
+    const sid = String(name).replace(/^wf_/, "").split("__")[0];
+    return docIds.has(sid);
+  });
+}
+
+function checkRetryPreservesBoardIds(evidenceDir) {
+  const fullDir = resolvePath(evidenceDir);
+  if (!fs.existsSync(fullDir)) return false;
+  const afterPath = path.join(fullDir, "wf-desc-snapshot-after.json");
+  if (!fs.existsSync(afterPath)) return true;
+  const archiveDir = path.join(fullDir, "archive");
+  if (!fs.existsSync(archiveDir)) return true;
+  const attempts = fs.readdirSync(archiveDir).filter((d) => /^attempt-\d+$/.test(d));
+  if (attempts.length === 0) return true;
+  attempts.sort((a, b) => parseInt(b.split("-")[1], 10) - parseInt(a.split("-")[1], 10));
+  const prevAfter = path.join(archiveDir, attempts[0], "wf-desc-snapshot-after.json");
+  if (!fs.existsSync(prevAfter)) return true;
+  let prev, curr;
+  try {
+    prev = JSON.parse(fs.readFileSync(prevAfter, "utf8"));
+    curr = JSON.parse(fs.readFileSync(afterPath, "utf8"));
+  } catch (e) {
+    return false;
+  }
+  const prevIds = (Array.isArray(prev) ? prev : [])
+    .map((e) => e && e.id)
+    .filter(Boolean);
+  const currIds = new Set(
+    (Array.isArray(curr) ? curr : [])
+      .map((e) => e && e.id)
+      .filter(Boolean)
+  );
+  return prevIds.every((id) => currIds.has(id));
+}
+
+function checkRequestCoverageValid(claimPath) {
+  if (!checkFileExists(claimPath)) return false;
+  const claim = parseJsonFile(claimPath);
+  const rc = claim.request_coverage;
+  if (rc === undefined || rc === null) return false;
+  if (typeof rc === "number") return rc >= 0 && rc <= 1;
+  if (typeof rc === "string") {
+    const m = rc.match(/^(\d+(?:\.\d+)?)\s*%?$/);
+    if (!m) return false;
+    const n = parseFloat(m[1]);
+    return n >= 0 && n <= 100;
+  }
+  if (typeof rc === "object") {
+    return typeof rc.covered === "number" && typeof rc.total === "number" && rc.total > 0 && rc.covered <= rc.total;
+  }
+  return false;
+}
+
+function checkNoDeferralPhrases(claimPath) {
+  if (!checkFileExists(claimPath)) return false;
+  const text = fs.readFileSync(resolvePath(claimPath), "utf8");
+  const forbidden = [
+    /후속\s*루프에서\s*처리/,
+    /이번엔\s*문서만\s*반영/,
+    /디자인은\s*나중에/,
+    /일단\s*개발\s*먼저/,
+    /나중에\s*처리/,
+    /추후\s*반영/,
+  ];
+  return !forbidden.some((re) => re.test(text));
+}
+
+function normalizeRawText(value) {
+  if (value === undefined || value === null) return "";
+  return String(value)
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n+/g, "\n")
+    .trim();
+}
+
+function sha256Hex(value) {
+  const crypto = require("crypto");
+  return crypto.createHash("sha256").update(String(value)).digest("hex");
+}
+
+function getPreReviewPath(batchId, itemId) {
+  return `workspace/planning/.pre-review/${batchId}/${itemId}.json`;
+}
+
+function parseUserRawBlock(prompt) {
+  if (typeof prompt !== "string" || !prompt) return null;
+  const fence = prompt.match(/```user_raw\s*\n([\s\S]*?)\n```/);
+  if (fence) return fence[1].trim();
+  const header = prompt.match(/사용자 원문:\s*\n([\s\S]*?)(?:\n\s*사전 검토|\n\s*boards-snapshot|\n\s*action_rationale|$)/);
+  if (header) return header[1].trim();
+  return null;
+}
+
+function parsePreReviewQA(prompt) {
+  if (typeof prompt !== "string" || !prompt) return [];
+  const block = prompt.match(/사전 검토 Q&A:\s*\n([\s\S]*?)(?:\n\s*boards-snapshot|\n\s*action_rationale|\n\s*planning-doc-sections|$)/);
+  if (!block) return [];
+  if (/질문\s*없음/.test(block[1])) return [];
+  const pairs = [];
+  const re = /Q\s*:\s*([^\n]+)\s*\n\s*A\s*:\s*([^\n]+)/g;
+  let m;
+  while ((m = re.exec(block[1])) !== null) {
+    pairs.push({ q: m[1].trim(), a: m[2].trim() });
+  }
+  return pairs;
+}
+
+function capturePreReviewFromPrompt(meta, prompt) {
+  if (!meta || meta.role !== "planner" || meta.mode !== "plan") return;
+  if (!meta.batch_id || !meta.item_id) return;
+  const userRaw = parseUserRawBlock(prompt);
+  if (!userRaw) return;
+  const normalized = normalizeRawText(userRaw);
+  const qa = parsePreReviewQA(prompt);
+  const target = resolvePath(getPreReviewPath(meta.batch_id, meta.item_id));
+  const payload = {
+    batch_id: meta.batch_id,
+    item_id: meta.item_id,
+    user_raw: userRaw,
+    user_raw_normalized: normalized,
+    user_raw_hash: sha256Hex(normalized),
+    qa_pairs: qa,
+    captured_at: nowIso(),
+  };
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, JSON.stringify(payload, null, 2));
+  } catch (e) {
+    process.stderr.write(`[capturePreReview] write failed: ${e.message}\n`);
+  }
+}
+
+function checkUserRawRequestMatch(claimPath, preReviewPath) {
+  if (!checkFileExists(claimPath)) return false;
+  if (!checkFileExists(preReviewPath)) return false;
+  const claim = parseJsonFile(claimPath);
+  const pre = parseJsonFile(preReviewPath);
+  const quoted = claim && claim.user_raw_request_quoted;
+  const origin = pre && (pre.user_raw_normalized || pre.user_raw);
+  if (!quoted || !origin) return false;
+  const nq = normalizeRawText(quoted);
+  const no = normalizeRawText(origin);
+  if (!nq || !no) return false;
+  if (nq === no) return true;
+  if (no.includes(nq) && nq.length >= Math.max(8, Math.floor(no.length * 0.5))) return true;
+  return false;
+}
+
+function checkPreReviewQaApplied(claimPath, preReviewPath) {
+  if (!checkFileExists(claimPath)) return false;
+  if (!checkFileExists(preReviewPath)) return false;
+  const claim = parseJsonFile(claimPath);
+  const pre = parseJsonFile(preReviewPath);
+  const expected = Array.isArray(pre && pre.qa_pairs) ? pre.qa_pairs : [];
+  if (expected.length === 0) return true;
+  const applied = claim && claim.pre_review_applied;
+  if (!applied) return false;
+  const haystack = typeof applied === "string" ? applied : JSON.stringify(applied);
+  const hay = normalizeRawText(haystack);
+  for (const { q, a } of expected) {
+    const qToken = normalizeRawText(q).slice(0, 12);
+    const aToken = normalizeRawText(a).slice(0, 12);
+    if (!qToken || !aToken) continue;
+    if (!hay.includes(qToken) || !hay.includes(aToken)) return false;
+  }
+  return true;
+}
+
+const PENPOT_STATUS_PATH = "workspace/planning/.penpot-status.json";
+const PENPOT_STATUS_MAX_AGE_MS = 30 * 60 * 1000;
+
+function checkPenpotReachability() {
+  const cfgPath = resolvePath("workspace/planning/project-config.md");
+  if (fs.existsSync(cfgPath)) {
+    try {
+      const cfg = fs.readFileSync(cfgPath, "utf8");
+      if (/penpot\s*:\s*(disabled|off|none)/i.test(cfg)) return null;
+    } catch (e) {
+      // ignore config read error
+    }
+  }
+  const full = resolvePath(PENPOT_STATUS_PATH);
+  if (!fs.existsSync(full)) {
+    return `Penpot 선검사 누락: ${PENPOT_STATUS_PATH} 파일 없음. planner dispatch 전에 mcp__penpot__high_level_overview 또는 동급 ping 을 한 번 실행하고 결과를 이 파일에 { reachable: true, checked_at, file_id } 로 기록하라. 접근 실패면 hold-open penpot_unavailable.`;
+  }
+  let status;
+  try {
+    status = JSON.parse(fs.readFileSync(full, "utf8"));
+  } catch (e) {
+    return `Penpot 상태 파일 파싱 실패: ${e.message}. ${PENPOT_STATUS_PATH} 를 다시 기록하라.`;
+  }
+  const checkedAt = status && status.checked_at;
+  const ageMs = checkedAt ? Date.now() - Date.parse(checkedAt) : Infinity;
+  if (!Number.isFinite(ageMs) || ageMs > PENPOT_STATUS_MAX_AGE_MS) {
+    return `Penpot 상태 파일이 30분 초과 stale (checked_at=${checkedAt || "미기재"}). 새로 ping 후 갱신하라.`;
+  }
+  if (status.reachable !== true) {
+    return `Penpot unreachable (${PENPOT_STATUS_PATH} reachable=${status.reachable}). hold-open penpot_unavailable 기록 후 접근성 회복 전까지 planner dispatch 금지.`;
+  }
+  return null;
+}
+
+const REQUEST_COVERAGE_STOPWORDS = new Set([
+  "그리고", "그러면", "그러나", "하지만", "또는", "해서", "하여", "해줘", "해주세요", "주세요",
+  "만들어", "만들어줘", "만들어주세요", "만들기", "만든다", "만들자",
+  "있는", "없는", "있다", "없다", "이다", "입니다", "하다", "한다", "했다",
+  "것을", "것이", "것도", "것은", "것", "수", "때", "곳", "안", "밖", "위", "아래",
+  "바", "듯", "점", "등", "및", "내", "외", "속", "쪽",
+  "으로", "까지", "부터", "에서", "에게", "한테", "께서", "으로서", "로서", "으로써", "로써",
+  "앱", "서비스", "프로젝트", "기능", "화면",
+  "사용자", "유저",
+  "웹", "모바일", "태블릿",
+]);
+
+function tokenizeRequestText(text) {
+  if (typeof text !== "string" || !text) return [];
+  const cleaned = text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`[^`]*`/g, " ")
+    .replace(/[>\-*#|"'`\[\](){}.,!?;:/\\]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return [];
+  const raw = cleaned.split(/\s+/);
+  const tokens = new Set();
+  for (const w of raw) {
+    const stripped = w.replace(/(을|를|이|가|은|는|에|의|과|와|도|만|뿐|으로|로|에서|에게|부터|까지)$/u, "");
+    const token = stripped.length >= 2 ? stripped : w;
+    if (token.length < 2) continue;
+    if (REQUEST_COVERAGE_STOPWORDS.has(token)) continue;
+    if (/^\d+$/.test(token)) continue;
+    tokens.add(token);
+  }
+  return Array.from(tokens);
+}
+
+function extractWorkboardRequestText(workboardPath, itemId) {
+  if (!checkFileExists(workboardPath)) return null;
+  const content = fs.readFileSync(resolvePath(workboardPath), "utf8");
+  const lines = content.split("\n");
+  const rowRegex = new RegExp(`\\|\\s*${itemId}\\s*\\|`);
+  const row = lines.find((l) => rowRegex.test(l));
+  if (!row) return null;
+  const cells = row.split("|").map((c) => c.trim());
+  return cells[2] || "";
+}
+
+function extractPlanningDocFeatureSection(docPath) {
+  if (!checkFileExists(docPath)) return "";
+  const content = fs.readFileSync(resolvePath(docPath), "utf8");
+  const lines = content.split("\n");
+  const startIdx = lines.findIndex((l) => /^##\s*기능\s*명세/.test(l));
+  if (startIdx === -1) return "";
+  let endIdx = lines.length;
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    if (/^##\s+/.test(lines[i])) {
+      endIdx = i;
+      break;
+    }
+  }
+  return lines.slice(startIdx, endIdx).join("\n");
+}
+
+function checkRequestCoverageCrossCheck(workboardPath, itemId, docPath) {
+  const requestText = extractWorkboardRequestText(workboardPath, itemId);
+  if (!requestText) return false;
+  const featureText = extractPlanningDocFeatureSection(docPath);
+  if (!featureText) return false;
+  const tokens = tokenizeRequestText(requestText);
+  if (tokens.length === 0) return true;
+  const hay = featureText.replace(/\s+/g, " ");
+  const missing = tokens.filter((t) => !hay.includes(t));
+  const covered = tokens.length - missing.length;
+  const ratio = covered / tokens.length;
+  if (ratio < 0.8) {
+    const logPath = resolvePath(`workspace/evidence/planner/_coverage/${itemId}.json`);
+    try {
+      fs.mkdirSync(path.dirname(logPath), { recursive: true });
+      fs.writeFileSync(
+        logPath,
+        JSON.stringify(
+          {
+            item_id: itemId,
+            tokens,
+            missing,
+            covered,
+            ratio,
+            threshold: 0.8,
+            checked_at: nowIso(),
+          },
+          null,
+          2
+        )
+      );
+    } catch (e) {
+      // ignore log write failure
+    }
+    return false;
+  }
+  return true;
+}
+
+const FIELD_QUALITY_FORBIDDEN = [
+  /\bTBD\b/i,
+  /\bTODO\b/i,
+  /\blorem\b/i,
+  /\bplaceholder\b/i,
+  /\bN\/A\b/i,
+  /예시\s*\d*/,
+  /샘플/,
+  /미정/,
+  /추후\s*(반영|작성|보강|정리)/,
+  /나중에/,
+  /좋은\s*UX/,
+  /사용자\s*친화적/,
+  /적절한/,
+  /알아서/,
+];
+
+function checkJsonArrayItemQuality(filePath, fieldPath) {
+  if (!checkFileExists(filePath)) return false;
+  const obj = parseJsonFile(filePath);
+  const arr = getByPath(obj, fieldPath);
+  if (!Array.isArray(arr)) return false;
+  if (arr.length === 0) return false;
+  const prefixes = new Set();
+  for (const item of arr) {
+    if (typeof item !== "string") return false;
+    const trimmed = item.trim();
+    if (!trimmed) return false;
+    for (const re of FIELD_QUALITY_FORBIDDEN) {
+      if (re.test(trimmed)) return false;
+    }
+    const words = trimmed
+      .split(/[\s,./:;()\[\]{}"'`]+/)
+      .filter((w) => w.length >= 2);
+    const unique = new Set(words);
+    if (unique.size < 3) return false;
+    const prefix = trimmed.slice(0, 6);
+    if (prefixes.has(prefix)) return false;
+    prefixes.add(prefix);
+  }
+  return true;
+}
+
+function checkLessonsLearnedAppendIfApplied(claimPath, lessonsPath, dispatchCreatedAt) {
+  if (!checkFileExists(claimPath)) return false;
+  const claim = parseJsonFile(claimPath);
+  const applied = String(claim.lessons_learned_applied || "").toUpperCase();
+  if (!["Y", "N"].includes(applied)) return false;
+  if (applied === "N") return true;
+  if (!checkFileExists(lessonsPath)) return false;
+  if (!checkMtimeAfter(lessonsPath, dispatchCreatedAt)) return false;
+  const full = resolvePath(lessonsPath);
+  const txt = fs.readFileSync(full, "utf8");
+  if (!/###\s*\[Batch\d+\]\[R\d+\]/.test(txt)) return false;
+  return true;
+}
+
+function checkTesterRequiredConsistency(claimPath) {
+  if (!checkFileExists(claimPath)) return false;
+  const claim = parseJsonFile(claimPath);
+  const devReady = String(claim.developer_ready || "").toUpperCase();
+  const testerReq = String(claim.tester_required || "").toUpperCase();
+  if (!["Y", "N"].includes(testerReq)) return false;
+  if (devReady === "Y" && testerReq !== "Y") return false;
+  const reason = claim.tester_reason;
+  if (typeof reason !== "string" || reason.trim().length < 10) return false;
+  return true;
+}
+
+function checkActionConsistency(claimPath) {
+  if (!checkFileExists(claimPath)) return false;
+  const claim = parseJsonFile(claimPath);
+  const action = String(claim.action || "").toUpperCase();
+  const wf = Array.isArray(claim.wf_boards) ? claim.wf_boards : [];
+  const desc = Array.isArray(claim.desc_boards) ? claim.desc_boards : [];
+  if (!["CREATE", "UPDATE", "UPDATE+CREATE", "NO_CHANGE"].includes(action)) return false;
+  if (action === "NO_CHANGE") {
+    return wf.length === 0 && desc.length === 0;
+  }
+  return wf.length > 0 && desc.length > 0;
+}
+
+function checkTranscriptNoForbiddenWrites(transcriptPath, forbiddenPatterns) {
+  if (!checkFileExists(transcriptPath)) return false;
+  const fullPath = resolvePath(transcriptPath);
+  const content = fs.readFileSync(fullPath, "utf8");
+  const lines = content.split("\n");
+  const writeToolRe = /"(?:Write|Edit|NotebookEdit|MultiEdit)"/;
+  const filePathRe = /"file_path"\s*:\s*"([^"]+)"/;
+  for (const line of lines) {
+    if (!writeToolRe.test(line)) continue;
+    const m = line.match(filePathRe);
+    if (!m) continue;
+    const fp = m[1];
+    for (const pattern of forbiddenPatterns) {
+      const regex = new RegExp(pattern);
+      if (regex.test(fp)) return false;
+    }
+  }
+  return true;
+}
+
+function checkTranscriptStepOrder(transcriptPath) {
+  if (!checkFileExists(transcriptPath)) return false;
+  const fullPath = resolvePath(transcriptPath);
+  const content = fs.readFileSync(fullPath, "utf8");
+  const lines = content.split("\n").filter((l) => l.trim());
+  const markers = {
+    read_workboard: /request-workboard\.md/,
+    read_sequence: /planner-workflow\/references\/sequence\.md/,
+    boards_snapshot: /boards-snapshot\.json/,
+    write_planning_doc: /A-planning-doc\.md/,
+    write_wf_evidence: /wf-export\.json/,
+    write_claim: /planner\.claim\.json/,
+  };
+  const firstSeen = {};
+  for (let i = 0; i < lines.length; i++) {
+    for (const [key, re] of Object.entries(markers)) {
+      if (firstSeen[key] === undefined && re.test(lines[i])) {
+        firstSeen[key] = i;
+      }
+    }
+  }
+  const order = ["read_workboard", "read_sequence", "boards_snapshot", "write_planning_doc", "write_wf_evidence", "write_claim"];
+  let last = -1;
+  for (const key of order) {
+    const idx = firstSeen[key];
+    if (idx === undefined) return false;
+    if (idx < last) return false;
+    last = idx;
+  }
+  return true;
+}
+
+function checkPlanningDocSections(filePath) {
+  if (!checkFileExists(filePath)) return false;
+  const content = fs.readFileSync(resolvePath(filePath), "utf8");
+  const lines = content.split("\n");
+  for (const heading of PLANNING_DOC_REQUIRED_SECTIONS) {
+    const idx = lines.findIndex((l) => l.trim() === heading);
+    if (idx === -1) return false;
+    let nextHeadingIdx = lines.length;
+    for (let i = idx + 1; i < lines.length; i++) {
+      if (/^##\s/.test(lines[i])) {
+        nextHeadingIdx = i;
+        break;
+      }
+    }
+    const body = lines.slice(idx + 1, nextHeadingIdx).join("\n").trim();
+    if (body.length < 4) return false;
+  }
+  return true;
+}
+
 function checkJsonArrayEmpty(filePath, fieldPath) {
   if (!checkFileExists(filePath)) {
     return false;
@@ -1193,7 +1877,10 @@ function checkMtimeAfter(filePath, isoString) {
     return false;
   }
   const stat = fs.statSync(resolvePath(filePath));
-  return stat.mtimeMs > Date.parse(isoString);
+  const threshold = Date.parse(isoString);
+  if (Number.isNaN(threshold)) return false;
+  const MARGIN_MS = 2000;
+  return stat.mtimeMs + MARGIN_MS > threshold;
 }
 
 function buildClaudeProjectSlug() {
@@ -1518,12 +2205,15 @@ function getStateContext(state, meta) {
   };
 }
 
-function getTicketPath(state, meta, ticketKind) {
+function getTicketPath(state, meta, ticketKind, suffix) {
+  const leaf = suffix
+    ? `${meta.role}.${ticketKind}.${suffix}.json`
+    : `${meta.role}.${ticketKind}.json`;
   return path.join(
     resolvePath(state.roots.tickets),
     meta.batch_id,
     meta.item_id,
-    `${meta.role}.${ticketKind}.json`
+    leaf
   );
 }
 
@@ -1552,10 +2242,46 @@ function hasOpenDispatch(dispatchState) {
 }
 
 function hasIssuedTicket(roleState) {
-  return (
-    (roleState.done_ticket && roleState.done_ticket.status === "issued") ||
-    (roleState.skip_ticket && roleState.skip_ticket.status === "issued")
-  );
+  const doneOk =
+    roleState.done_ticket &&
+    roleState.done_ticket.status === "issued" &&
+    ticketFileIntact(roleState.done_ticket) &&
+    !isTicketStale(roleState.done_ticket);
+  const skipOk =
+    roleState.skip_ticket &&
+    roleState.skip_ticket.status === "issued" &&
+    ticketFileIntact(roleState.skip_ticket);
+  return Boolean(doneOk || skipOk);
+}
+
+function ticketFileIntact(ticketState) {
+  if (!ticketState || !ticketState.path) return false;
+  const full = resolvePath(ticketState.path);
+  if (!fs.existsSync(full)) return false;
+  if (ticketState.content_sha256) {
+    try {
+      const crypto = require("crypto");
+      const buf = fs.readFileSync(full);
+      const actual = crypto.createHash("sha256").update(buf).digest("hex");
+      if (actual !== ticketState.content_sha256) return false;
+    } catch (e) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isTicketStale(ticketState) {
+  if (!ticketState || !ticketState.validated_at) return false;
+  const ticketAt = Date.parse(ticketState.validated_at);
+  if (Number.isNaN(ticketAt)) return false;
+  const planDoc = resolvePath("workspace/planning/A-planning-doc.md");
+  if (!fs.existsSync(planDoc)) return false;
+  try {
+    const mtime = fs.statSync(planDoc).mtimeMs;
+    if (mtime > ticketAt + 2000) return true;
+  } catch (e) {}
+  return false;
 }
 
 function hasDownstreamIssuedTicket(item, currentRole) {
@@ -1572,7 +2298,21 @@ function hasDownstreamIssuedTicket(item, currentRole) {
     .some((roleState) => hasIssuedTicket(roleState));
 }
 
+function archiveTicketFile(ticketState) {
+  if (!ticketState || !ticketState.path) return;
+  try {
+    const full = resolvePath(ticketState.path);
+    if (!fs.existsSync(full)) return;
+    const ts = Date.now();
+    const archiveDir = path.join(path.dirname(full), "archive");
+    fs.mkdirSync(archiveDir, { recursive: true });
+    const archived = path.join(archiveDir, `${path.basename(full)}.${ts}`);
+    fs.renameSync(full, archived);
+  } catch (e) {}
+}
+
 function resetTicketState(ticketState) {
+  archiveTicketFile(ticketState);
   ticketState.status = "none";
   ticketState.path = null;
   ticketState.validated_at = null;
@@ -1631,11 +2371,20 @@ function buildRetryScope(failedChecks) {
   return failedChecks.map((entry) => `retry ${entry.id}: ${entry.label}`);
 }
 
-function ensureReviewGate(item) {
+function ensureReviewGate(item, batchId) {
   if (!item.review_gate || typeof item.review_gate !== "object") {
     item.review_gate = defaultReviewGateState();
   }
-  return item.review_gate;
+  const g = item.review_gate;
+  if (g.schema_version !== REVIEW_GATE_SCHEMA_VERSION) {
+    g.schema_version = REVIEW_GATE_SCHEMA_VERSION;
+    if (!Array.isArray(g.planner_response_history)) g.planner_response_history = [];
+    if (!Array.isArray(g.designer_response_history)) g.designer_response_history = [];
+    if (!g.scope) g.scope = "item";
+  }
+  if (!g.item_id && item.item_id) g.item_id = item.item_id;
+  if (!g.batch_id && batchId) g.batch_id = batchId;
+  return g;
 }
 
 function openReviewGate(item) {
@@ -1712,14 +2461,342 @@ function parseAgentToolInput(payload) {
     typeof toolInput.description === "string"
       ? toolInput.description.trim()
       : "";
+  const prompt =
+    typeof toolInput.prompt === "string" ? toolInput.prompt : "";
 
   return {
     tool_use_id: payload && payload.tool_use_id ? String(payload.tool_use_id) : null,
     subagent_type:
       typeof toolInput.subagent_type === "string" ? toolInput.subagent_type : null,
     description,
+    prompt,
     meta: parseTaskSubject(description),
   };
+}
+
+const DISPATCH_PROMPT_REQUIREMENTS = {
+  "planner:plan": {
+    must_include: [
+      "시작 순서 고정",
+      "request-workboard.md",
+      "project-config.md",
+      "A-benchmark.md",
+      "영향도",
+      "reference_flows",
+      "expected_user_path",
+      "critical_states",
+      "avoid_patterns",
+      "UPDATE",
+      "CREATE",
+      "wf_",
+      "desc_",
+      "export_shape",
+      "gap check",
+      "claim",
+      "evidence",
+      "사용자 원문",
+      "사전 검토",
+      "boards-snapshot",
+      "action_rationale",
+      "planning-doc-sections.md",
+      "lessons-learned.md",
+    ],
+    must_match: [/1\)/, /2\)/, /3\)/, /4\)/, /5\)/, /6\)/],
+  },
+  "planner:revise": {
+    must_include: [
+      "시작 순서 고정",
+      "developer-review.md",
+      "qa-review.md",
+      "수긍",
+      "반박",
+      "wf-desc-snapshot-before",
+      "wf-desc-snapshot-after",
+      "export_shape",
+      "gap check",
+      "claim",
+      "evidence",
+    ],
+    must_match: [/1\)/, /2\)/, /3\)/, /4\)/, /5\)/, /6\)/],
+  },
+  "designer:review": {
+    must_include: [
+      "시작 순서 고정",
+      "request-workboard.md",
+      "wf_",
+      "desc_",
+      "A-uiux-review.md",
+    ],
+    must_match: [/1\)/, /2\)/, /3\)/],
+  },
+  "designer:apply": {
+    must_include: [
+      "시작 순서 고정",
+      "wf-desc-snapshot-before",
+      "wf-desc-snapshot-after",
+      "design_",
+      "export_shape",
+      "claim",
+      "evidence",
+    ],
+    must_match: [/1\)/, /2\)/, /3\)/, /4\)/, /5\)/],
+  },
+  "developer:review": {
+    must_include: [
+      "시작 순서 고정",
+      "request-workboard.md",
+      "wf_",
+      "desc_",
+      "design_",
+      "developer-review.md",
+    ],
+    must_match: [/1\)/, /2\)/, /3\)/],
+  },
+  "developer:implement": {
+    must_include: [
+      "시작 순서 고정",
+      "request-workboard.md",
+      "project-config.md",
+      "wf_",
+      "desc_",
+      "design_",
+      "workspace/development",
+      "gap check",
+      "claim",
+      "evidence",
+    ],
+    must_match: [/1\)/, /2\)/, /3\)/],
+  },
+  "qa:review": {
+    must_include: [
+      "시작 순서 고정",
+      "request-workboard.md",
+      "wf_",
+      "desc_",
+      "design_",
+      "qa-review.md",
+    ],
+    must_match: [/1\)/, /2\)/, /3\)/],
+  },
+  "qa:tc": {
+    must_include: [
+      "시작 순서 고정",
+      "C-testcases.md",
+      ".qa-last-run.json",
+      "claim",
+      "evidence",
+    ],
+    must_match: [/1\)/, /2\)/, /3\)/],
+  },
+  "qa:verify": {
+    must_include: [
+      "시작 순서 고정",
+      "D-qa-verification.md",
+      ".qa-last-run.json",
+      "claim",
+      "evidence",
+    ],
+    must_match: [/1\)/, /2\)/, /3\)/],
+  },
+  "tester": {
+    must_include: [
+      "시작 순서 고정",
+      "Playwright",
+      ".tester-state.json",
+      ".tester-last-run.json",
+      "claim",
+      "evidence",
+    ],
+    must_match: [/1\)/, /2\)/, /3\)/],
+  },
+};
+
+function checkReviseBundleAvailability(state, meta) {
+  if (meta.role !== "planner" || meta.mode !== "revise") return null;
+  const batch = (state.batches || []).find((b) => b && b.batch_id === meta.batch_id);
+  const item = batch && (batch.items || []).find((i) => i && i.item_id === meta.item_id);
+  if (!item) return null;
+  const gate = ensureReviewGate(item, meta.batch_id);
+  if (gate.status === "open" && gate.developer_review === "done" && gate.qa_review === "done") {
+    const devReview = resolvePath(`workspace/reviews/${meta.batch_id}/${meta.item_id}/developer-review.md`);
+    const qaReview = resolvePath(`workspace/reviews/${meta.batch_id}/${meta.item_id}/qa-review.md`);
+    const missing = [];
+    if (!fs.existsSync(devReview)) missing.push("workspace/reviews/{batch}/{item}/developer-review.md");
+    if (!fs.existsSync(qaReview)) missing.push("workspace/reviews/{batch}/{item}/qa-review.md");
+    if (missing.length) {
+      return `Loop B planner revise blocked for ${meta.batch_id}/${meta.item_id}: review bundle missing — ${missing.join(", ")}`;
+    }
+  } else if (gate.status === "idle" || gate.status === "resolved") {
+    const uxReview = resolvePath("workspace/design/A-uiux-review.md");
+    if (!fs.existsSync(uxReview)) {
+      return `Loop A-2 planner revise blocked: workspace/design/A-uiux-review.md missing — designer review must precede planner revise.`;
+    }
+  }
+  return null;
+}
+
+function runIntegrityGuards(state, meta) {
+  // T28: CLAUDE_PROJECT_DIR env 검증
+  if (process.env.CLAUDE_PROJECT_DIR && !fs.existsSync(process.env.CLAUDE_PROJECT_DIR)) {
+    return `CLAUDE_PROJECT_DIR points to non-existent path: ${process.env.CLAUDE_PROJECT_DIR}`;
+  }
+
+  // T10: 체크리스트 JSON 존재/비empty 검증
+  const checklistPath = resolvePath("workflow/checklists/task-gate-checklists.json");
+  if (!fs.existsSync(checklistPath)) {
+    return "Checklist file missing: workflow/checklists/task-gate-checklists.json. Refusing dispatch.";
+  }
+  try {
+    const cl = JSON.parse(fs.readFileSync(checklistPath, "utf8"));
+    const entries = (cl && cl.roles && cl.roles[meta.role]) || [];
+    const minRequired = { planner: 20, designer: 5, developer: 5, qa: 3, tester: 3, secretary: 1 }[meta.role] || 1;
+    if (!Array.isArray(entries) || entries.length < minRequired) {
+      return `Checklist for role=${meta.role} has ${entries.length} entries (min ${minRequired}). Refusing dispatch — zero-check bypass blocked.`;
+    }
+  } catch (e) {
+    return `Checklist JSON parse error: ${e.message}. Refusing dispatch.`;
+  }
+
+  // T23: role_order 순서 검증
+  if (Array.isArray(state.batches)) {
+    const batch = state.batches.find((b) => b && b.batch_id === meta.batch_id);
+    const item = batch && (batch.items || []).find((i) => i && i.item_id === meta.item_id);
+    if (item && Array.isArray(item.role_order)) {
+      const expected = DEFAULT_ROLE_ORDER.filter((r) => item.role_order.includes(r));
+      const got = item.role_order.filter((r) => DEFAULT_ROLE_ORDER.includes(r));
+      if (got.join(",") !== expected.join(",")) {
+        return `Invalid role_order for ${meta.batch_id}/${meta.item_id}: ${got.join(",")} (expected: ${expected.join(",")}).`;
+      }
+    }
+  }
+
+  // T12: settings.json 해시 기록 + 변조 감지
+  const settingsPath = resolvePath(".claude/settings.json");
+  const fpPath = resolvePath("workspace/planning/.settings-fingerprint.json");
+  if (fs.existsSync(settingsPath)) {
+    const currentHash = computeFileHash(settingsPath);
+    let fp = {};
+    if (fs.existsSync(fpPath)) {
+      try {
+        fp = JSON.parse(fs.readFileSync(fpPath, "utf8"));
+      } catch (e) {
+        fp = {};
+      }
+    }
+    if (fp.settings_sha256 && fp.settings_sha256 !== currentHash) {
+      if (!fp.acknowledged_at) {
+        return `.claude/settings.json changed since last run (hash mismatch). Run: node .claude/scripts/validator.js ack-settings to acknowledge.`;
+      }
+    }
+    if (!fp.settings_sha256) {
+      fs.writeFileSync(fpPath, JSON.stringify({ settings_sha256: currentHash, recorded_at: nowIso() }, null, 2));
+    }
+  }
+
+  return null;
+}
+
+function checkStateItemInitialized(state, meta) {
+  if (!meta || !meta.batch_id || !meta.item_id) return null;
+  const batch = (state.batches || []).find((b) => b && b.batch_id === meta.batch_id);
+  if (!batch) {
+    return `State not initialized for ${meta.batch_id}. Run: node .claude/scripts/validator.js ensure-state-item ${meta.batch_id} ${meta.item_id} "<title>" before dispatching an Agent.`;
+  }
+  const item = (batch.items || []).find((i) => i && i.item_id === meta.item_id);
+  if (!item) {
+    return `State not initialized for ${meta.batch_id}/${meta.item_id}. Run ensure-state-item before dispatching.`;
+  }
+  if (!Array.isArray(item.roles) || item.roles.length === 0) {
+    return `Role slots not initialized for ${meta.batch_id}/${meta.item_id}. Re-run ensure-state-item.`;
+  }
+  return null;
+}
+
+function checkBenchmarkQuality() {
+  const benchPath = resolvePath("workspace/planning/A-benchmark.md");
+  if (!fs.existsSync(benchPath)) {
+    return "Benchmark file missing: workspace/planning/A-benchmark.md. Run benchmarking step before dispatching planner.";
+  }
+  const raw = fs.readFileSync(benchPath, "utf8");
+  const content = raw.trim();
+  if (content.length < 400) {
+    return `Benchmark file too short (${content.length} bytes). Needs at least 400 chars with multiple services and extracted patterns.`;
+  }
+  const placeholderTokens = [
+    /\bTBD\b/i,
+    /\bTODO\b/i,
+    /\blorem\b/i,
+    /\bplaceholder\b/i,
+    /XXX{2,}/,
+    /채워\s*넣/,
+    /추후\s*작성/,
+    /미작성/,
+  ];
+  for (const re of placeholderTokens) {
+    if (re.test(content)) {
+      return `Benchmark file contains placeholder token (${re.source}). Replace with real competitor research before dispatch.`;
+    }
+  }
+  const sectionMatches = [...content.matchAll(/^(#{2,3})\s+(.+)$/gm)];
+  if (sectionMatches.length < 2) {
+    return `Benchmark needs at least 2 comparison sections (## or ### headings). Found ${sectionMatches.length}.`;
+  }
+  const lines = content.split("\n");
+  const sectionBodies = [];
+  for (let i = 0; i < sectionMatches.length; i++) {
+    const head = sectionMatches[i];
+    const headLine = lines.findIndex((l, idx) => idx >= 0 && l === head[0]);
+    if (headLine === -1) continue;
+    let end = lines.length;
+    for (let j = headLine + 1; j < lines.length; j++) {
+      if (/^#{2,3}\s+/.test(lines[j])) {
+        end = j;
+        break;
+      }
+    }
+    const body = lines.slice(headLine + 1, end).join("\n").trim();
+    sectionBodies.push({ title: head[2].trim(), body });
+  }
+  const requiredKeywords = [
+    { any: ["장점", "강점", "좋은 점"] },
+    { any: ["회피", "단점", "주의", "약점"] },
+  ];
+  for (const { title, body } of sectionBodies) {
+    if (body.length < 80) {
+      return `Benchmark section "${title}" too short (${body.length} chars). Need at least 80 chars of substantive description.`;
+    }
+    for (const group of requiredKeywords) {
+      if (!group.any.some((kw) => body.includes(kw))) {
+        return `Benchmark section "${title}" missing required keyword group (${group.any.join("/")}). Each section needs both 장점/강점 line and 회피/단점 line.`;
+      }
+    }
+  }
+  return null;
+}
+
+function validateDispatchPrompt(meta, prompt) {
+  if (!meta || !meta.role) return null;
+  const key = meta.mode ? `${meta.role}:${meta.mode}` : meta.role;
+  const rule = DISPATCH_PROMPT_REQUIREMENTS[key] || DISPATCH_PROMPT_REQUIREMENTS[meta.role];
+  if (!rule) return null;
+
+  const missingIncludes = (rule.must_include || []).filter(
+    (needle) => !prompt.includes(needle)
+  );
+  const missingMatches = (rule.must_match || []).filter(
+    (re) => !re.test(prompt)
+  );
+
+  if (missingIncludes.length === 0 && missingMatches.length === 0) return null;
+
+  const parts = [];
+  if (missingIncludes.length > 0) {
+    parts.push(`missing required phrases: ${missingIncludes.map((s) => JSON.stringify(s)).join(", ")}`);
+  }
+  if (missingMatches.length > 0) {
+    parts.push(`missing required step markers: ${missingMatches.map((re) => re.source).join(", ")}`);
+  }
+  return `Dispatch prompt for ${key} is incomplete — ${parts.join("; ")}. Include the full 시작 순서 고정 step list from process.md before calling the Agent.`;
 }
 
 function buildDispatchEntry(payload, parsed) {
@@ -1809,66 +2886,172 @@ function collectModeAwarePredecessorFailures(item, currentRole, currentMode) {
   return collectPredecessorFailures(item, currentRole);
 }
 
+function shellEscape(value) {
+  if (value === undefined || value === null) return "";
+  const s = String(value);
+  if (s === "") return "";
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(s)) return s;
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
 function substituteCommand(template, context) {
   return template
-    .replace(/\{batch_id\}/g, context.batch_id)
-    .replace(/\{item_id\}/g, context.item_id)
-    .replace(/\{role\}/g, context.role)
+    .replace(/\{batch_id\}/g, shellEscape(context.batch_id))
+    .replace(/\{item_id\}/g, shellEscape(context.item_id))
+    .replace(/\{role\}/g, shellEscape(context.role))
     .replace(/\{batch_index\}/g, String(context.batch_index))
     .replace(/\{item_index\}/g, String(context.item_index))
     .replace(/\{role_index\}/g, String(context.role_index))
-    .replace(/\{dispatch_created_at\}/g, context.dispatch_created_at || "")
-    .replace(/\{dispatch_claimed_at\}/g, context.dispatch_claimed_at || "")
-    .replace(/\{dispatch_finished_at\}/g, context.dispatch_finished_at || "")
-    .replace(/\{agent_transcript_path\}/g, context.agent_transcript_path || "");
+    .replace(/\{dispatch_created_at\}/g, shellEscape(context.dispatch_created_at || ""))
+    .replace(/\{dispatch_claimed_at\}/g, shellEscape(context.dispatch_claimed_at || ""))
+    .replace(/\{dispatch_finished_at\}/g, shellEscape(context.dispatch_finished_at || ""))
+    .replace(/\{agent_transcript_path\}/g, shellEscape(context.agent_transcript_path || ""));
+}
+
+function readClaimAction(context) {
+  try {
+    const claimRel = `workspace/claims/${context.batch_id}/${context.item_id}/${context.role}.claim.json`;
+    const full = resolvePath(claimRel);
+    if (!fs.existsSync(full)) return null;
+    const claim = JSON.parse(fs.readFileSync(full, "utf8"));
+    return claim && claim.action ? String(claim.action).toUpperCase() : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function validateTranscriptPath(ctx) {
+  if (!ctx.agent_transcript_path) return ctx;
+  const p = String(ctx.agent_transcript_path);
+  const allowed = /^(workspace\/|\.claude\/projects\/|\/Users\/[^/]+\/\.claude\/projects\/)/.test(p);
+  if (!allowed) {
+    return { ...ctx, agent_transcript_path: "", transcript_rejected_reason: `disallowed path: ${p}` };
+  }
+  return ctx;
 }
 
 function runChecklist(state, context, checklistEntries) {
-  return checklistEntries
-    .filter((entry) => !entry.when_mode || entry.when_mode === context.mode)
-    .map((entry) => {
-    const command = substituteCommand(entry.command, context);
+  const safeContext = validateTranscriptPath(context);
+  const currentAction = readClaimAction(safeContext);
+  const filteredOut = [];
+  const kept = checklistEntries
+    .filter((entry) => {
+      const ok = !entry.when_mode || entry.when_mode === safeContext.mode;
+      if (!ok) filteredOut.push({ id: entry.id, reason: `when_mode ${entry.when_mode}` });
+      return ok;
+    })
+    .filter((entry) => {
+      if (!entry.when_action_not) return true;
+      const blocked = Array.isArray(entry.when_action_not)
+        ? entry.when_action_not.map((a) => String(a).toUpperCase())
+        : [String(entry.when_action_not).toUpperCase()];
+      const ok = !blocked.includes(currentAction);
+      if (!ok) filteredOut.push({ id: entry.id, reason: `action=${currentAction}` });
+      return ok;
+    })
+    .filter((entry) => {
+      if (!entry.when_action) return true;
+      const allowed = Array.isArray(entry.when_action)
+        ? entry.when_action.map((a) => String(a).toUpperCase())
+        : [String(entry.when_action).toUpperCase()];
+      const ok = allowed.includes(currentAction);
+      if (!ok) filteredOut.push({ id: entry.id, reason: `action=${currentAction} not in ${allowed}` });
+      return ok;
+    });
+
+  try {
+    appendJsonLine(resolvePath("workspace/reports/hook-events.jsonl"), {
+      logged_at: nowIso(),
+      hook_event_name: "ChecklistFilter",
+      task_meta: { batch_id: safeContext.batch_id, item_id: safeContext.item_id, role: safeContext.role },
+      extra: { filtered_out: filteredOut, kept_count: kept.length, total: checklistEntries.length },
+    });
+  } catch (e) {}
+
+  return kept.map((entry) => {
+    const command = substituteCommand(entry.command, safeContext);
     const result = spawnSync(command, {
       cwd: resolveProjectRoot(),
       shell: true,
       encoding: "utf8",
+      timeout: 30000,
     });
+
+    const stderr = (result.stderr || "").trim();
+    const stdout = (result.stdout || "").trim();
+    let status = "fail";
+    if (result.status === 0 && !result.error && !result.signal) {
+      try {
+        const parsed = stdout ? JSON.parse(stdout) : {};
+        status = parsed.ok === true ? "pass" : "fail";
+      } catch (e) {
+        status = "fail";
+      }
+    }
 
     return {
       id: entry.id,
       label: entry.label,
       command,
-      status: result.status === 0 ? "pass" : "fail",
+      status,
       evidence_paths: [],
-      stdout: (result.stdout || "").trim(),
-      stderr: (result.stderr || "").trim(),
+      stdout,
+      stderr,
     };
-    });
+  });
 }
 
-function writeTicket(state, meta, ticketKind, payload) {
-  const filePath = getTicketPath(state, meta, ticketKind);
+function writeTicket(state, meta, ticketKind, payload, suffix) {
+  const filePath = getTicketPath(state, meta, ticketKind, suffix);
   writeJsonFile(filePath, payload);
   return filePath;
+}
+
+function computeFileHash(filePath) {
+  try {
+    const crypto = require("crypto");
+    const buf = fs.readFileSync(filePath);
+    return crypto.createHash("sha256").update(buf).digest("hex");
+  } catch (e) {
+    return null;
+  }
 }
 
 function issueTicket(state, meta, roleState, ticketKind, payload) {
   const filePath = writeTicket(state, meta, ticketKind, payload);
   const target = ticketKind === "skip" ? roleState.skip_ticket : roleState.done_ticket;
 
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Ticket write failed: ${filePath} missing after writeTicket`);
+  }
+  const hash = computeFileHash(filePath);
   target.status = "issued";
   target.path = path.relative(resolveProjectRoot(), filePath);
   target.validated_at = payload.validated_at;
   target.validated_by = payload.validated_by;
+  target.content_sha256 = hash;
   roleState.last_updated_at = payload.validated_at;
 }
 
 function rejectDoneTicket(state, meta, roleState, payload) {
-  const filePath = writeTicket(state, meta, "rejected", payload);
+  if (!Array.isArray(roleState.rejection_history)) {
+    roleState.rejection_history = [];
+  }
+  roleState.rejection_history.push({
+    validated_at: payload.validated_at,
+    failures: Array.isArray(payload.checklist)
+      ? payload.checklist.filter((c) => c.status !== "pass").map((c) => c.id)
+      : [],
+    reason: payload.reason || null,
+  });
+  const attempt = (roleState.rejection_history || []).length;
+  const filePath = writeTicket(state, meta, "rejected", payload, `attempt-${attempt}`);
+  const hash = computeFileHash(filePath);
   roleState.done_ticket.status = "rejected";
   roleState.done_ticket.path = path.relative(resolveProjectRoot(), filePath);
   roleState.done_ticket.validated_at = payload.validated_at;
   roleState.done_ticket.validated_by = payload.validated_by;
+  roleState.done_ticket.content_sha256 = hash;
   roleState.last_updated_at = payload.validated_at;
 }
 
@@ -2268,6 +3451,73 @@ async function handlePreToolUseAgent() {
     return;
   }
 
+  const promptError = validateDispatchPrompt(meta, parsed.prompt || "");
+  if (promptError) {
+    saveState(state);
+    if (state.gate_mode === "enforce") {
+      stderrBlock(promptError);
+    }
+    return;
+  }
+
+  const integrityError = runIntegrityGuards(state, meta);
+  if (integrityError) {
+    saveState(state);
+    if (state.gate_mode === "enforce") {
+      stderrBlock(integrityError);
+    }
+    return;
+  }
+
+  const reviseGateError = checkReviseBundleAvailability(state, meta);
+  if (reviseGateError) {
+    saveState(state);
+    if (state.gate_mode === "enforce") {
+      stderrBlock(reviseGateError);
+    }
+    return;
+  }
+
+  const stateInitError = checkStateItemInitialized(state, meta);
+  if (stateInitError) {
+    saveState(state);
+    if (state.gate_mode === "enforce") {
+      stderrBlock(stateInitError);
+    }
+    return;
+  }
+
+  if (meta.role === "planner") {
+    const benchError = checkBenchmarkQuality();
+    if (benchError) {
+      saveState(state);
+      if (state.gate_mode === "enforce") {
+        stderrBlock(benchError);
+      }
+      return;
+    }
+    const penpotError = checkPenpotReachability();
+    if (penpotError) {
+      saveState(state);
+      if (state.gate_mode === "enforce") {
+        stderrBlock(penpotError);
+      }
+      return;
+    }
+    capturePreReviewFromPrompt(meta, parsed.prompt || "");
+  }
+
+  if (meta.role === "designer" && meta.mode === "apply") {
+    const penpotError = checkPenpotReachability();
+    if (penpotError) {
+      saveState(state);
+      if (state.gate_mode === "enforce") {
+        stderrBlock(penpotError);
+      }
+      return;
+    }
+  }
+
   const context = getStateContext(state, meta);
   const retryLimit = context.item.retry_limit || 3;
   const predecessorFailures = collectModeAwarePredecessorFailures(
@@ -2544,7 +3794,6 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
     agent_transcript_path: payload.agent_transcript_path || "",
   };
 
-  context.roleState.attempt += 1;
   context.roleState.claim_path = path.relative(resolveProjectRoot(), getClaimPath(state, meta));
   context.roleState.artifacts = [
     {
@@ -2563,12 +3812,18 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
     },
   ];
   context.roleState.status = "done";
-  context.roleState.failed_check_ids = [];
-  context.roleState.retry_scope = [];
   context.roleState.last_updated_at = nowIso();
+  if (!context.roleState.attempts_by_mode || typeof context.roleState.attempts_by_mode !== "object") {
+    context.roleState.attempts_by_mode = {};
+  }
+  const modeKey = meta.mode || "default";
+  context.roleState.attempts_by_mode[modeKey] = (context.roleState.attempts_by_mode[modeKey] || 0) + 1;
   saveState(state);
 
   const results = runChecklist(state, checklistContext, checks);
+  context.roleState.attempt = (context.roleState.attempts_by_mode[modeKey] || 1);
+  context.roleState.failed_check_ids = [];
+  context.roleState.retry_scope = [];
   context.roleState.checklist = results.map((entry) => ({
     id: entry.id,
     label: entry.label,
@@ -2663,13 +3918,44 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
     })
   );
 
-  if (meta.role === "planner" && reviewGate.status !== "idle") {
-    reviewGate.planner_response = "done";
-    reviewGate.status = "awaiting_design_sync";
-    reviewGate.resolved_at = null;
+  if (!Array.isArray(reviewGate.planner_response_history)) {
+    reviewGate.planner_response_history = [];
+  }
+  if (!Array.isArray(reviewGate.designer_response_history)) {
+    reviewGate.designer_response_history = [];
   }
 
-  if (meta.role === "designer" && reviewGate.status === "awaiting_design_sync") {
+  const isLoopBRevise =
+    meta.role === "planner" &&
+    meta.mode === "revise" &&
+    reviewGate.status === "open" &&
+    reviewGate.developer_review === "done" &&
+    reviewGate.qa_review === "done";
+
+  if (isLoopBRevise) {
+    reviewGate.planner_response_history.push({
+      at: validatedAt,
+      mode: meta.mode,
+      result: "done",
+    });
+    reviewGate.planner_response = "done";
+    if (reviewGate.status !== "awaiting_design_sync") {
+      reviewGate.status = "awaiting_design_sync";
+      reviewGate.resolved_at = null;
+    }
+  }
+
+  const isLoopBDesignerSync =
+    meta.role === "designer" &&
+    meta.mode === "apply" &&
+    reviewGate.status === "awaiting_design_sync";
+
+  if (isLoopBDesignerSync) {
+    reviewGate.designer_response_history.push({
+      at: validatedAt,
+      mode: meta.mode,
+      result: "done",
+    });
     reviewGate.designer_response = "done";
     reviewGate.status = "resolved";
     reviewGate.resolved_at = validatedAt;
@@ -3153,12 +4439,53 @@ function handleHoldResolve(args) {
 
 function handleNextAction() {
   const state = loadState();
+  autoHoldStuckReviewGates(state);
+  saveState(state);
   printJson({
     ok: true,
     updated_at: nowIso(),
     current_batch_id: getCurrentBatch(state)?.batch_id || null,
     next_action: buildNextAction(state),
   });
+}
+
+const REVIEW_GATE_SYNC_TIMEOUT_MS = 30 * 60 * 1000;
+const LOOP_A2_REVISE_MAX = 5;
+
+function autoHoldStuckReviewGates(state) {
+  const now = Date.now();
+  for (const batch of state.batches || []) {
+    for (const item of batch.items || []) {
+      const gate = item.review_gate;
+      if (!gate) continue;
+
+      if (gate.status === "awaiting_design_sync" && gate.opened_at) {
+        const openedAt = Date.parse(gate.opened_at);
+        if (!Number.isNaN(openedAt) && now - openedAt > REVIEW_GATE_SYNC_TIMEOUT_MS) {
+          upsertHold(
+            state,
+            "review_gate_sync_timeout",
+            `Review gate stuck in awaiting_design_sync for >${REVIEW_GATE_SYNC_TIMEOUT_MS / 60000}m: ${batch.batch_id}/${item.item_id}`,
+            { batch_id: batch.batch_id, item_id: item.item_id },
+            "validator"
+          );
+        }
+      }
+
+      const plannerAttempts = Array.isArray(gate.planner_response_history)
+        ? gate.planner_response_history.length
+        : 0;
+      if (plannerAttempts >= LOOP_A2_REVISE_MAX) {
+        upsertHold(
+          state,
+          "loop_a2_revise_exhausted",
+          `Loop A-2 planner revise exceeded ${LOOP_A2_REVISE_MAX} iterations: ${batch.batch_id}/${item.item_id}`,
+          { batch_id: batch.batch_id, item_id: item.item_id, iterations: plannerAttempts },
+          "validator"
+        );
+      }
+    }
+  }
 }
 
 function handleParseSubject(subject) {
@@ -3182,8 +4509,22 @@ function handleParseSubject(subject) {
 
 function handleCheck(args) {
   const [type, ...rest] = args;
-  let ok = false;
 
+  try {
+    return handleCheckInner(type, rest);
+  } catch (err) {
+    printJson({
+      ok: false,
+      check: type,
+      args: rest,
+      error: err && err.message ? err.message : String(err),
+    });
+    process.exit(1);
+  }
+}
+
+function handleCheckInner(type, rest) {
+  let ok = false;
   switch (type) {
     case "file_exists":
       ok = checkFileExists(rest[0]);
@@ -3212,6 +4553,60 @@ function handleCheck(args) {
     case "json_array_empty":
       ok = checkJsonArrayEmpty(rest[0], rest[1]);
       break;
+    case "json_array_min_size":
+      ok = checkJsonArrayMinSize(rest[0], rest[1], parseInt(rest[2], 10) || 1);
+      break;
+    case "json_object_has_keys":
+      ok = checkJsonObjectHasKeys(rest[0], rest[1], rest.slice(2));
+      break;
+    case "planning_doc_sections":
+      ok = checkPlanningDocSections(rest[0]);
+      break;
+    case "json_array_item_min_length":
+      ok = checkJsonArrayItemMinLength(rest[0], rest[1], parseInt(rest[2], 10) || 10);
+      break;
+    case "json_array_no_duplicates":
+      ok = checkJsonArrayNoDuplicates(rest[0], rest[1]);
+      break;
+    case "workboard_item_has_quote":
+      ok = checkWorkboardItemHasQuote(rest[0], rest[1]);
+      break;
+    case "hash_record_and_compare":
+      ok = checkHashRecordAndCompare(rest[0], rest[1]);
+      break;
+    case "transcript_step_order":
+      ok = checkTranscriptStepOrder(rest[0]);
+      break;
+    case "transcript_no_forbidden_writes":
+      ok = checkTranscriptNoForbiddenWrites(rest[0], rest.slice(1));
+      break;
+    case "wf_desc_pair_match":
+      ok = checkWfDescPairMatch(rest[0]);
+      break;
+    case "board_name_matches_item":
+      ok = checkBoardNameMatchesItem(rest[0], rest[1]);
+      break;
+    case "desc_no_forbidden_terms":
+      ok = checkDescNoForbiddenTerms(rest[0]);
+      break;
+    case "action_consistency":
+      ok = checkActionConsistency(rest[0]);
+      break;
+    case "multi_screen_evidence_exists":
+      ok = checkMultiScreenEvidenceExists(rest[0], rest[1]);
+      break;
+    case "wf_boards_match_planning_doc":
+      ok = checkWfBoardsMatchPlanningDoc(rest[0], rest[1]);
+      break;
+    case "retry_preserves_board_ids":
+      ok = checkRetryPreservesBoardIds(rest[0]);
+      break;
+    case "request_coverage_valid":
+      ok = checkRequestCoverageValid(rest[0]);
+      break;
+    case "no_deferral_phrases":
+      ok = checkNoDeferralPhrases(rest[0]);
+      break;
     case "json_field_matches":
       ok = checkJsonFieldMatches(rest[0], rest[1], rest.slice(2).join(" "));
       break;
@@ -3235,6 +4630,24 @@ function handleCheck(args) {
       break;
     case "snapshot_preserves_ids":
       ok = checkSnapshotPreservesIds(rest[0], rest[1]);
+      break;
+    case "user_raw_request_match":
+      ok = checkUserRawRequestMatch(rest[0], rest[1]);
+      break;
+    case "pre_review_qa_applied":
+      ok = checkPreReviewQaApplied(rest[0], rest[1]);
+      break;
+    case "tester_required_consistency":
+      ok = checkTesterRequiredConsistency(rest[0]);
+      break;
+    case "lessons_learned_append_if_applied":
+      ok = checkLessonsLearnedAppendIfApplied(rest[0], rest[1], rest[2]);
+      break;
+    case "request_coverage_cross_check":
+      ok = checkRequestCoverageCrossCheck(rest[0], rest[1], rest[2]);
+      break;
+    case "json_array_item_quality":
+      ok = checkJsonArrayItemQuality(rest[0], rest[1]);
       break;
     default:
       printJson({
@@ -3360,10 +4773,26 @@ async function main() {
     case "next-action":
       handleNextAction();
       return;
+    case "ack-settings":
+      handleAckSettings();
+      return;
     default:
       printUsage();
       process.exit(1);
   }
+}
+
+function handleAckSettings() {
+  const settingsPath = resolvePath(".claude/settings.json");
+  const fpPath = resolvePath("workspace/planning/.settings-fingerprint.json");
+  if (!fs.existsSync(settingsPath)) {
+    printJson({ ok: false, error: ".claude/settings.json missing" });
+    process.exit(1);
+  }
+  const hash = computeFileHash(settingsPath);
+  const payload = { settings_sha256: hash, recorded_at: nowIso(), acknowledged_at: nowIso() };
+  fs.writeFileSync(fpPath, JSON.stringify(payload, null, 2));
+  printJson({ ok: true, fingerprint_path: path.relative(resolveProjectRoot(), fpPath), settings_sha256: hash });
 }
 
 main().catch((error) => {
