@@ -14,9 +14,10 @@
 - **루프 간 전환 시 절대 사용자에게 확인하지 않는다.** 전 루프가 끝나면 즉시 다음 루프를 시작한다.
 - "진행할까요?", "다음으로 넘어갈까요?", "어떻게 할까?" 같은 질문을 하지 않는다.
 - 루프 A 완료 → 즉시 루프 B 시작. 루프 B 완료 → 즉시 루프 C 시작. 예외 없음.
-- 에이전트 백그라운드 작업 완료 대기 중에도 사용자에게 중간 상태를 보고하지 않는다.
+- 에이전트는 **백그라운드 잡처럼 따로 방치하지 않고**, 메인 하네스 흐름 안에서 포그라운드 순차 단계로 다룬다.
+- 현재 단계가 진행 중이면 사용자에게 중간 상태를 보고하지 않는다.
 - 사용자에게 전달하는 시점은 **전체 작업 완료 후 1번**뿐이다.
-- 백그라운드 진행 여부는 `workspace/reports/live-status.json`과 `workspace/reports/live-status.md`로 외부 확인 가능해야 한다.
+- `workspace/reports/live-status.json`과 `workspace/reports/live-status.md`는 디버그/관찰용 상태 파일이다. 운영 의미의 백그라운드 러너를 전제하지 않는다.
 - 단, **루프 시작 전** 아래 3가지는 예외다.
   - 필수 항목(플랫폼, 기술 스택) 확인
   - 사전 검토 단계 질문
@@ -35,7 +36,7 @@
   - `node .claude/scripts/validator.js next-action`
 - `next-action.response_allowed = false`면 사용자에게 절대 답하지 않는다. 내부 루프를 계속 진행한다.
 - `next-action.action = halt`면 **하드 스톱 미니 프로세스**로 간주한다. 이 경우에만 사용자에게 상황을 설명하고 답을 기다린다.
-- `next-action.action = wait`면 열린 dispatch가 있다는 뜻이다. 사용자 응답 없이 내부적으로 대기/재확인만 한다.
+- `next-action.action = active_agent`면 현재 포그라운드 단계의 Agent가 아직 진행 중이거나 종료 정리가 남았다는 뜻이다. 사용자 응답 없이 같은 흐름 안에서 재확인만 한다.
 - `next-action.action = dispatch`면 `description`에 나온 역할을 즉시 호출한다.
 - `next-action.action = branch_review_decision`면 사용자에게 묻지 말고 직전 리뷰 결과를 읽어 내부 분기한다.
   - 디자이너 리뷰 결과가 수정 필요면 `planner revise`

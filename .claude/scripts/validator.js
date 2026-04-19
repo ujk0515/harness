@@ -703,9 +703,9 @@ function buildNextAction(state) {
   const openDispatches = summarizeOpenDispatches(dispatchState);
   if (openDispatches.length > 0) {
     return {
-      action: "wait",
+      action: "active_agent",
       response_allowed: false,
-      reason: "open dispatch exists",
+      reason: "foreground agent step still in progress",
       active_dispatch: openDispatches[0],
     };
   }
@@ -748,6 +748,7 @@ function buildLiveStatus(state) {
   return {
     updated_at: nowIso(),
     gate_mode: state.gate_mode || "enforce",
+    execution_mode: "foreground",
     active_dispatch: activeDispatch,
     open_dispatch_count: openDispatches.length,
     open_dispatches: openDispatches,
@@ -760,7 +761,7 @@ function buildLiveStatus(state) {
     next_action: nextAction,
     hint:
       openDispatches.length > 0
-        ? "현재 백그라운드 에이전트가 동작 중일 수 있음. active_dispatch와 running_for를 확인."
+        ? "현재 포그라운드 단계의 Agent가 진행 중이거나 종료 정리 중이다. active_dispatch와 running_for를 확인."
         : nextAction.response_allowed
           ? "열린 dispatch 없음. 전체 완료 응답 가능."
           : "열린 dispatch는 없지만 다음 단계가 남아 있음. next_action을 따라 내부 루프를 계속 진행해야 함.",
@@ -779,10 +780,11 @@ function writeLiveStatus(state) {
     "",
     `- updated_at: ${payload.updated_at}`,
     `- gate_mode: ${payload.gate_mode}`,
+    `- execution_mode: ${payload.execution_mode}`,
     `- open_dispatch_count: ${payload.open_dispatch_count}`,
     `- hint: ${payload.hint}`,
     "",
-    "## Active Dispatch",
+    "## Active Agent Step",
   ];
 
   if (payload.active_dispatch) {
