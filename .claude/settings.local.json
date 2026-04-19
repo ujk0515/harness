@@ -7,7 +7,12 @@
       "mcp__penpot__penpot_api_info",
       "mcp__penpot__export_shape",
       "Bash(python3 -c ' *)",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "Bash(cp .claude/agents/planner.md /Users/yoojaekwon/Desktop/develop/TripLog/.claude/agents/planner.md)",
+      "Bash(cp .claude/agents/designer.md /Users/yoojaekwon/Desktop/develop/TripLog/.claude/agents/designer.md)",
+      "Bash(cp .claude/agents/developer.md /Users/yoojaekwon/Desktop/develop/TripLog/.claude/agents/developer.md)",
+      "Bash(cp .claude/agents/qa.md /Users/yoojaekwon/Desktop/develop/TripLog/.claude/agents/qa.md)",
+      "Bash(cp .claude/agents/tester.md /Users/yoojaekwon/Desktop/develop/TripLog/.claude/agents/tester.md)"
     ]
   }
 }
