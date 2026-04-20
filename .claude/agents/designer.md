@@ -25,7 +25,7 @@ hooks:
   1. `workspace/planning/request-workboard.md` + 기획서(md) + 대응 `wf_*` / `desc_*`를 읽는다.
   2. UX 관점의 누락, 혼란, 불편, 상태 부족을 정리한다.
   3. `workspace/design/A-uiux-review.md`에 리뷰를 쓴다.
-  4. 리뷰만 하고 끝낸다. `design_*`, claim/evidence, done ticket은 이 모드 대상이 아니다.
+  4. `design_*` 수정은 금지. claim(`designer.claim.json`, mode=review)은 이 모드에서도 **필수**로 남기며 validator 가 review 전용 체크로 `designer.done.json` 을 발급한다.
 - `apply:` 모드
   1. `workspace/planning/request-workboard.md` + 기획서(md) + 대응 `wf_*` / `desc_*`를 읽는다.
   2. review sync면 `developer-review.md` + `qa-review.md` + planner 반영 결과도 읽는다.
@@ -161,14 +161,16 @@ hooks:
 ## designer 작업 모드 (필수)
 - designer 호출 description은 항상 `review:` 또는 `apply:`로 시작해야 한다.
 - `review:`는 UX 리뷰 전용이다.
-  - 기획서 + `wf_*` + `desc_*`를 본다
-  - `workspace/design/A-uiux-review.md`를 쓴다
-  - `design_*`를 만들거나 수정하지 않는다
-  - 이 모드는 `designer.done`을 발급하지 않는다
+  - 기획서 + `wf_*` + `desc_*` (+ 루프 B 재리뷰 시 `design_*`)를 본다
+  - 루프 A-1/A-2: `workspace/design/A-uiux-review.md` 를 쓴다
+  - 루프 B: `workspace/reviews/{batch_id}/{item_id}/designer-review.md` 를 쓴다 (UIUX/디스크립션/기획서 보완점 3섹션 필수)
+  - `design_*` 를 만들거나 수정하지 않는다
+  - **claim(`designer.claim.json`) 필수**: `mode: "review"`, `review_score`(0~100 정수), `review_approval`(Y|N), `review_issues`(배열), `review_summary`(20자 이상). A-uiux-review.md 의 점수와 일치시킨다.
+  - 루프 A-3 진입 게이트: A-uiux-review.md 점수가 **80점 이상**이거나 `review_approval = Y` 여야 한다. 미달이면 validator 가 designer apply dispatch 를 차단한다.
 - `apply:`는 디자인 적용 전용이다.
   - `design_*`를 새로 만들거나 수정한다
   - claim/evidence를 남긴다
-  - 이 모드만 `designer.done` 대상이다
+  - `review:` 와 `apply:` 둘 다 `designer.done` 발급 대상이다 (review 는 review_claim_complete + score_gate 통과, apply 는 coverage/snapshot/boards-present 통과).
 - mode prefix가 없으면 게이트에서 차단된다.
 
 ## 참여하는 루프

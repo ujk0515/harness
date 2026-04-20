@@ -205,6 +205,12 @@
         "command": "node .claude/scripts/validator.js check json_array_min_size workspace/claims/{batch_id}/{item_id}/planner.claim.json avoid_patterns 2"
       },
       {
+        "id": "planner_penpot_boards_live",
+        "label": "planner claim의 wf_/desc_boards가 .penpot-boards.json 실제 존재 리스트에 모두 포함 (30분 fresh)",
+        "when_action_not": "NO_CHANGE",
+        "command": "node .claude/scripts/validator.js check penpot_boards_present workspace/claims/{batch_id}/{item_id}/planner.claim.json planner"
+      },
+      {
         "id": "planner_boards_snapshot_recent",
         "label": "planner boards-snapshot evidence가 현재 시도 이후 갱신됨",
         "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/planner/{batch_id}/{item_id}/boards-snapshot.json {dispatch_created_at}"
@@ -296,6 +302,12 @@
         "command": "node .claude/scripts/validator.js check transcript_read_if_exists {agent_transcript_path} workspace/design/A-uiux-review.md"
       },
       {
+        "id": "planner_revise_prior_review_addressed",
+        "label": "루프 A-2 revise: A-uiux-review.md 개선사항 키워드의 50% 이상이 기획서 또는 claim review 응답에 반영",
+        "when_mode": "revise",
+        "command": "node .claude/scripts/validator.js check prior_review_addressed workspace/design/A-uiux-review.md workspace/planning/A-planning-doc.md workspace/claims/{batch_id}/{item_id}/planner.claim.json"
+      },
+      {
         "id": "planner_revise_b_read_dev_review",
         "label": "루프 B revise: developer-review.md Read 호출 존재",
         "when_mode": "revise",
@@ -333,6 +345,11 @@
         "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/planner.claim.json tester_reason"
       },
       {
+        "id": "planner_claim_designer_skip_valid",
+        "label": "designer_required=N 면제는 UI 비가시 변경 + design_reason 30자 이상 + 사유가 서버/API/내부로직/비UI/스키마 류일 때만 허용",
+        "command": "node .claude/scripts/validator.js check designer_skip_valid workspace/claims/{batch_id}/{item_id}/planner.claim.json workspace/planning/request-workboard.md {item_id}"
+      },
+      {
         "id": "planner_claim_tester_required_consistency",
         "label": "developer_ready=Y면 tester_required도 Y여야 함 (Loop D tester 생략 금지)",
         "command": "node .claude/scripts/validator.js check tester_required_consistency workspace/claims/{batch_id}/{item_id}/planner.claim.json"
@@ -353,6 +370,30 @@
         "label": "revise 모드에서 claim.review_source 존재",
         "when_mode": "revise",
         "command": "node .claude/scripts/validator.js check json_field_truthy workspace/claims/{batch_id}/{item_id}/planner.claim.json review_source"
+      },
+      {
+        "id": "planner_revise_loop_b_bundle_complete",
+        "label": "루프 B planner revise: 4인 리뷰(planner/designer/developer/qa) + UIUX/디스크립션/기획서 보완점 섹션 + 본문 120자 이상",
+        "when_mode": "revise",
+        "command": "node .claude/scripts/validator.js check loop_b_review_bundle_complete {batch_id} {item_id}"
+      },
+      {
+        "id": "planner_revise_assignments_classification",
+        "label": "루프 B planner revise: assignments 분류 일관성(planner_tasks는 기획·흐름 키워드, designer_tasks는 시각·레이아웃 키워드)",
+        "when_mode": "revise",
+        "command": "node .claude/scripts/validator.js check assignments_classification {batch_id} {item_id}"
+      },
+      {
+        "id": "planner_revise_loop_b_assignments_valid",
+        "label": "루프 B planner revise: assignments.json 형식 유효 (planner_tasks/designer_tasks/rationale)",
+        "when_mode": "revise",
+        "command": "node .claude/scripts/validator.js check loop_b_assignments_valid {batch_id} {item_id}"
+      },
+      {
+        "id": "planner_revise_processed_assigned_tasks",
+        "label": "루프 B planner revise: claim.assigned_task_ids가 assignments.planner_tasks 전부 커버",
+        "when_mode": "revise",
+        "command": "node .claude/scripts/validator.js check claim_processed_assigned_tasks workspace/claims/{batch_id}/{item_id}/planner.claim.json workspace/reviews/{batch_id}/{item_id}/assignments.json planner"
       },
       {
         "id": "planner_claim_request_coverage_valid",
@@ -417,6 +458,36 @@
         "label": "planner desc-export evidence의 board_name이 desc_로 시작",
         "when_action_not": "NO_CHANGE",
         "command": "node .claude/scripts/validator.js check json_field_matches workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json board_name ^desc_"
+      },
+      {
+        "id": "planner_review_file_exists",
+        "label": "루프 B planner review: planner-review.md 존재",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check file_exists workspace/reviews/{batch_id}/{item_id}/planner-review.md"
+      },
+      {
+        "id": "planner_review_file_has_uiux",
+        "label": "루프 B planner review: UIUX 보완점 섹션 존재",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check file_contains workspace/reviews/{batch_id}/{item_id}/planner-review.md UIUX 보완점"
+      },
+      {
+        "id": "planner_review_file_has_desc",
+        "label": "루프 B planner review: 디스크립션(desc_*) 보완점 섹션 존재",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check file_contains workspace/reviews/{batch_id}/{item_id}/planner-review.md 디스크립션"
+      },
+      {
+        "id": "planner_review_file_has_plan",
+        "label": "루프 B planner review: 기획서 보완점 섹션 존재",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check file_contains workspace/reviews/{batch_id}/{item_id}/planner-review.md 기획서 보완점"
+      },
+      {
+        "id": "planner_review_recent",
+        "label": "루프 B planner review: 파일이 현재 시도 이후 갱신됨",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/reviews/{batch_id}/{item_id}/planner-review.md {dispatch_created_at}"
       },
       {
         "id": "planner_state_done",
@@ -535,6 +606,66 @@
         "command": "node .claude/scripts/validator.js check json_array_nonempty workspace/evidence/designer/{batch_id}/{item_id}/boards.json design_boards"
       },
       {
+        "id": "designer_covers_planner_targets",
+        "label": "designer claim.design_boards가 planner.design_target_boards 전부 커버",
+        "when_mode": "apply",
+        "command": "node .claude/scripts/validator.js check designer_covers_planner_targets workspace/claims/{batch_id}/{item_id}/designer.claim.json workspace/claims/{batch_id}/{item_id}/planner.claim.json"
+      },
+      {
+        "id": "design_boards_match_wf_boards",
+        "label": "planner.wf_boards 의 모든 screen_id 에 대응하는 design_* 존재",
+        "when_mode": "apply",
+        "command": "node .claude/scripts/validator.js check design_boards_match_wf_boards workspace/claims/{batch_id}/{item_id}/designer.claim.json workspace/claims/{batch_id}/{item_id}/planner.claim.json"
+      },
+      {
+        "id": "designer_penpot_boards_live",
+        "label": "designer claim의 design_boards가 .penpot-boards.json 실제 존재 리스트에 모두 포함 (30분 fresh)",
+        "when_mode": "apply",
+        "command": "node .claude/scripts/validator.js check penpot_boards_present workspace/claims/{batch_id}/{item_id}/designer.claim.json designer"
+      },
+      {
+        "id": "design_below_wf_desc_coord",
+        "label": "design_* y좌표가 wf_/desc_ bottom+120 이상이며 서로 겹치지 않고 같은 페이지",
+        "when_mode": "apply",
+        "command": "node .claude/scripts/validator.js check design_below_wf_desc workspace/evidence/designer/{batch_id}/{item_id}"
+      },
+      {
+        "id": "designer_developer_ready_cross_check",
+        "label": "designer developer_ready=Y 시 missing_items 공백 + planner 타겟 전원 커버 + wf 매칭 교차검증",
+        "when_mode": "apply",
+        "command": "node .claude/scripts/validator.js check developer_ready_cross_check workspace/claims/{batch_id}/{item_id}/designer.claim.json workspace/claims/{batch_id}/{item_id}/planner.claim.json"
+      },
+      {
+        "id": "designer_review_claim_complete",
+        "label": "designer review: claim(mode=review/review_score/review_approval/review_issues/review_summary) 완결",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check review_claim_complete workspace/claims/{batch_id}/{item_id}/designer.claim.json"
+      },
+      {
+        "id": "designer_review_score_gate_pass",
+        "label": "designer review: A-uiux-review.md 점수 80점 이상 또는 review_approval=Y",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check designer_review_score_gate workspace/design/A-uiux-review.md workspace/claims/{batch_id}/{item_id}/designer.claim.json 80"
+      },
+      {
+        "id": "designer_review_loop_b_file_if_present",
+        "label": "루프 B designer review: designer-review.md가 있으면 UIUX/디스크립션/기획서 보완점 섹션과 본문 120자 이상",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check loop_b_review_bundle_complete {batch_id} {item_id}"
+      },
+      {
+        "id": "designer_apply_loop_b_assignments_valid",
+        "label": "루프 B designer apply (sync): assignments.json 유효",
+        "when_mode": "apply",
+        "command": "node .claude/scripts/validator.js check loop_b_assignments_valid {batch_id} {item_id}"
+      },
+      {
+        "id": "designer_apply_loop_b_processed_assigned_tasks",
+        "label": "루프 B designer apply (sync): claim.assigned_task_ids가 assignments.designer_tasks 전부 커버",
+        "when_mode": "apply",
+        "command": "node .claude/scripts/validator.js check claim_processed_assigned_tasks workspace/claims/{batch_id}/{item_id}/designer.claim.json workspace/reviews/{batch_id}/{item_id}/assignments.json designer"
+      },
+      {
         "id": "designer_state_done",
         "label": "request-state 내 designer status = done",
         "command": "node .claude/scripts/validator.js check json_field_equals workspace/planning/request-state.json batches.{batch_index}.items.{item_index}.roles.{role_index}.status done"
@@ -582,6 +713,30 @@
         "command": "node .claude/scripts/validator.js check dir_has_entries_after workspace/evidence/developer/{batch_id}/{item_id} {dispatch_created_at}"
       },
       {
+        "id": "developer_review_file_has_uiux",
+        "label": "루프 B developer review: developer-review.md에 UIUX 보완점 섹션 존재",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check file_contains workspace/reviews/{batch_id}/{item_id}/developer-review.md UIUX 보완점"
+      },
+      {
+        "id": "developer_review_file_has_desc",
+        "label": "루프 B developer review: developer-review.md에 디스크립션(desc_*) 보완점 섹션 존재",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check file_contains workspace/reviews/{batch_id}/{item_id}/developer-review.md 디스크립션"
+      },
+      {
+        "id": "developer_review_file_has_plan",
+        "label": "루프 B developer review: developer-review.md에 기획서 보완점 섹션 존재",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check file_contains workspace/reviews/{batch_id}/{item_id}/developer-review.md 기획서 보완점"
+      },
+      {
+        "id": "developer_review_recent",
+        "label": "루프 B developer review: 파일이 현재 시도 이후 갱신됨",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/reviews/{batch_id}/{item_id}/developer-review.md {dispatch_created_at}"
+      },
+      {
         "id": "developer_state_done",
         "label": "request-state 내 developer status = done",
         "command": "node .claude/scripts/validator.js check json_field_equals workspace/planning/request-state.json batches.{batch_index}.items.{item_index}.roles.{role_index}.status done"
@@ -627,6 +782,30 @@
         "id": "qa_report_recent",
         "label": "qa 검증 보고가 현재 시도 이후 갱신됨",
         "command": "node .claude/scripts/validator.js check mtime_after workspace/reports/D-qa-verification.md {dispatch_created_at}"
+      },
+      {
+        "id": "qa_review_file_has_uiux",
+        "label": "루프 B qa review: qa-review.md에 UIUX 보완점 섹션 존재",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check file_contains workspace/reviews/{batch_id}/{item_id}/qa-review.md UIUX 보완점"
+      },
+      {
+        "id": "qa_review_file_has_desc",
+        "label": "루프 B qa review: qa-review.md에 디스크립션(desc_*) 보완점 섹션 존재",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check file_contains workspace/reviews/{batch_id}/{item_id}/qa-review.md 디스크립션"
+      },
+      {
+        "id": "qa_review_file_has_plan",
+        "label": "루프 B qa review: qa-review.md에 기획서 보완점 섹션 존재",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check file_contains workspace/reviews/{batch_id}/{item_id}/qa-review.md 기획서 보완점"
+      },
+      {
+        "id": "qa_review_recent",
+        "label": "루프 B qa review: 파일이 현재 시도 이후 갱신됨",
+        "when_mode": "review",
+        "command": "node .claude/scripts/validator.js check mtime_after workspace/reviews/{batch_id}/{item_id}/qa-review.md {dispatch_created_at}"
       },
       {
         "id": "qa_state_done",

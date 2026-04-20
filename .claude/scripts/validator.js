@@ -1037,7 +1037,7 @@ function parseTaskSubject(subject) {
 function extractRoleMode(role, summary) {
   const trimmed = String(summary || "").trim();
   if (role === "planner") {
-    const matched = /^(plan|revise):\s+(.+)$/.exec(trimmed);
+    const matched = /^(plan|revise|review):\s+(.+)$/.exec(trimmed);
     return {
       mode: matched ? matched[1] : null,
       summary: matched ? matched[2].trim() : trimmed,
@@ -1080,7 +1080,7 @@ function validateRoleMode(meta) {
   }
 
   if (meta.role === "planner" && !meta.mode) {
-    return "Planner description must start with `plan:` or `revise:` after the role prefix.";
+    return "Planner description must start with `plan:`, `revise:`, or `review:` after the role prefix.";
   }
 
   if (meta.role === "designer" && !meta.mode) {
@@ -1738,6 +1738,505 @@ function checkJsonArrayItemQuality(filePath, fieldPath) {
   return true;
 }
 
+const LOOP_B_REVIEW_FILES = [
+  "planner-review.md",
+  "designer-review.md",
+  "developer-review.md",
+  "qa-review.md",
+];
+
+const LOOP_B_REVIEW_REQUIRED_SECTIONS = [
+  /(?:^|\n)##\s*UIUX\s*보완점/,
+  /(?:^|\n)##\s*디스크립션\s*\(desc_\*?\)\s*보완점/,
+  /(?:^|\n)##\s*기획서\s*보완점/,
+];
+
+const PENPOT_BOARDS_SNAPSHOT_PATH = "workspace/planning/.penpot-boards.json";
+const PENPOT_BOARDS_MAX_AGE_MS = 30 * 60 * 1000;
+
+function checkPenpotBoardsPresent(claimPath, role) {
+  if (!checkFileExists(claimPath)) return false;
+  const claim = parseJsonFile(claimPath);
+  const snapPath = resolvePath(PENPOT_BOARDS_SNAPSHOT_PATH);
+  if (!fs.existsSync(snapPath)) return false;
+  let snap;
+  try {
+    snap = JSON.parse(fs.readFileSync(snapPath, "utf8"));
+  } catch (e) {
+    return false;
+  }
+  const checkedAt = snap && snap.checked_at;
+  const ageMs = checkedAt ? Date.now() - Date.parse(checkedAt) : Infinity;
+  if (!Number.isFinite(ageMs) || ageMs > PENPOT_BOARDS_MAX_AGE_MS) return false;
+  const liveNames = new Set();
+  const liveIds = new Set();
+  if (Array.isArray(snap.boards)) {
+    for (const b of snap.boards) {
+      if (typeof b === "string") {
+        liveNames.add(b);
+      } else if (b && typeof b === "object") {
+        if (typeof b.board_name === "string") liveNames.add(b.board_name);
+        if (typeof b.board_id === "string") liveIds.add(b.board_id);
+      }
+    }
+  }
+  if (liveNames.size === 0 && liveIds.size === 0) return false;
+  const key = role === "planner" ? ["wf_boards", "desc_boards"] : role === "designer" ? ["design_boards"] : [];
+  for (const k of key) {
+    const arr = Array.isArray(claim[k]) ? claim[k] : [];
+    for (const b of arr) {
+      if (typeof b === "string") {
+        if (!liveNames.has(b) && !liveIds.has(b)) return false;
+        continue;
+      }
+      if (!b || typeof b !== "object") continue;
+      const hasName = typeof b.board_name === "string" && b.board_name.length > 0;
+      const hasId = typeof b.board_id === "string" && b.board_id.length > 0;
+      if (!hasName && !hasId) continue;
+      const nameMatch = hasName && liveNames.has(b.board_name);
+      const idMatch = hasId && liveIds.has(b.board_id);
+      if (!nameMatch && !idMatch) return false;
+    }
+  }
+  return true;
+}
+
+function readExportShapeFile(filePath) {
+  if (!checkFileExists(filePath)) return null;
+  try {
+    return parseJsonFile(filePath);
+  } catch (e) {
+    return null;
+  }
+}
+
+function extractBoardRect(shape) {
+  if (!shape || typeof shape !== "object") return null;
+  const sel = shape.selrect || shape.sel_rect || null;
+  let x, y, w, h;
+  if (sel && typeof sel === "object") {
+    const x1 = typeof sel.x1 === "number" ? sel.x1 : (typeof sel.x === "number" ? sel.x : null);
+    const y1 = typeof sel.y1 === "number" ? sel.y1 : (typeof sel.y === "number" ? sel.y : null);
+    const x2 = typeof sel.x2 === "number" ? sel.x2 : (x1 != null && typeof sel.width === "number" ? x1 + sel.width : null);
+    const y2 = typeof sel.y2 === "number" ? sel.y2 : (y1 != null && typeof sel.height === "number" ? y1 + sel.height : null);
+    if ([x1, y1, x2, y2].every((v) => typeof v === "number")) {
+      x = x1; y = y1; w = x2 - x1; h = y2 - y1;
+    }
+  }
+  if (x == null) x = typeof shape.x === "number" ? shape.x : shape.bounds && shape.bounds.x;
+  if (y == null) y = typeof shape.y === "number" ? shape.y : shape.bounds && shape.bounds.y;
+  if (w == null) w = typeof shape.width === "number" ? shape.width : shape.bounds && shape.bounds.width;
+  if (h == null) h = typeof shape.height === "number" ? shape.height : shape.bounds && shape.bounds.height;
+  const page = shape.page_id || shape.page || shape.parent_page || (shape.parent && shape.parent.page_id) || null;
+  if (![x, y, w, h].every((v) => typeof v === "number")) return null;
+  return { x, y, w, h, bottom: y + h, right: x + w, page };
+}
+
+function checkDesignBelowWfDesc(evidenceDir) {
+  const resolved = resolvePath(evidenceDir);
+  if (!fs.existsSync(resolved)) return false;
+  const wfPath = path.join(resolved, "wf-export.json");
+  const descPath = path.join(resolved, "desc-export.json");
+  const designPath = path.join(resolved, "design-export.json");
+  const wf = readExportShapeFile(wfPath);
+  const desc = readExportShapeFile(descPath);
+  const design = readExportShapeFile(designPath);
+  if (!design) return false;
+  if (!wf && !desc) return true;
+  const dr = extractBoardRect(design);
+  if (!dr) return false;
+  const candidates = [wf, desc].filter(Boolean).map(extractBoardRect).filter(Boolean);
+  if (candidates.length === 0) return true;
+  const maxBottom = Math.max(...candidates.map((r) => r.bottom));
+  if (dr.y < maxBottom + 120) return false;
+  for (const r of candidates) {
+    const xOverlap = !(dr.right <= r.x || dr.x >= r.right);
+    const yOverlap = !(dr.bottom <= r.y || dr.y >= r.bottom);
+    if (xOverlap && yOverlap) return false;
+  }
+  const pages = new Set(candidates.map((r) => r.page).filter(Boolean));
+  if (pages.size > 0 && dr.page && !pages.has(dr.page)) return false;
+  return true;
+}
+
+function parseReviewScore(content) {
+  if (typeof content !== "string" || !content) return null;
+  const patterns = [
+    /(?:^|\n)\s*(?:##\s*)?(?:종합\s*)?점수\s*[:：]?\s*(\d{1,3})/,
+    /(?:^|\n)\s*(?:##\s*)?총점\s*[:：]?\s*(\d{1,3})/,
+    /(?:^|\n)\s*(?:##\s*)?score\s*[:：]?\s*(\d{1,3})/i,
+    /(\d{1,3})\s*\/\s*100/,
+    /(\d{1,3})\s*점/,
+  ];
+  for (const re of patterns) {
+    const m = content.match(re);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (Number.isFinite(n) && n >= 0 && n <= 100) return n;
+    }
+  }
+  return null;
+}
+
+function checkDesignerReviewScoreGate(reviewMdPath, claimPath, minScore) {
+  if (!checkFileExists(reviewMdPath)) return false;
+  const content = fs.readFileSync(resolvePath(reviewMdPath), "utf8");
+  const min = Number.isFinite(parseInt(minScore, 10)) ? parseInt(minScore, 10) : 80;
+  let score = parseReviewScore(content);
+  if (claimPath && checkFileExists(claimPath)) {
+    const claim = parseJsonFile(claimPath);
+    if (typeof claim.review_score === "number") {
+      score = claim.review_score;
+    }
+    const approval = String(claim.review_approval || "").toUpperCase();
+    if (approval === "N") return false;
+  }
+  if (score === null) return false;
+  return score >= min;
+}
+
+const PRIOR_REVIEW_STOPWORDS = new Set([
+  "그리고", "그러나", "하지만", "또는", "경우", "이를", "있는", "없는", "필요", "추가", "수정",
+  "관련", "예를", "들어", "해서", "하여", "하는", "되는", "같은", "다른", "때문", "위해",
+  "대해", "통해", "에서", "부터", "까지", "으로", "이다", "하다", "있다", "없다",
+  "것이", "것은", "것을", "것도", "것", "수", "때", "곳", "등", "및", "중",
+  "우리", "여기", "거기", "저기", "이것", "그것", "저것", "이런", "그런", "저런",
+]);
+
+function extractKeywordsFromMd(text) {
+  if (typeof text !== "string" || !text) return [];
+  const cleaned = text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`[^`]*`/g, " ")
+    .replace(/[#>*\-|\[\](){}.,!?;:/\\"'`]+/g, " ")
+    .replace(/\s+/g, " ");
+  const out = new Set();
+  for (const w of cleaned.split(/\s+/)) {
+    if (!w) continue;
+    const stripped = w.replace(/(을|를|이|가|은|는|에|의|과|와|도|만|뿐|으로|로|에서|에게|부터|까지)$/u, "");
+    const tok = stripped.length >= 2 ? stripped : w;
+    if (tok.length < 2) continue;
+    if (/^\d+$/.test(tok)) continue;
+    if (PRIOR_REVIEW_STOPWORDS.has(tok)) continue;
+    out.add(tok);
+  }
+  return Array.from(out);
+}
+
+function checkPriorReviewAddressed(uiuxReviewPath, planningDocPath, claimPath) {
+  if (!checkFileExists(uiuxReviewPath)) return true;
+  if (!checkFileExists(planningDocPath)) return false;
+  const review = fs.readFileSync(resolvePath(uiuxReviewPath), "utf8");
+  const issuesBlock = review.match(/(?:^|\n)##?\s*개선\s*사항[\s\S]*?(?=\n##\s|$)/);
+  if (!issuesBlock) return true;
+  const tokens = extractKeywordsFromMd(issuesBlock[0]).slice(0, 40);
+  if (tokens.length === 0) return true;
+  const doc = fs.readFileSync(resolvePath(planningDocPath), "utf8");
+  let claimText = "";
+  if (claimPath && checkFileExists(claimPath)) {
+    const claim = parseJsonFile(claimPath);
+    claimText = JSON.stringify(claim.review_response_decisions || claim.review_response || claim.pre_review_applied || "");
+  }
+  const hay = `${doc}\n${claimText}`;
+  const covered = tokens.filter((t) => hay.includes(t));
+  return covered.length / tokens.length >= 0.7;
+}
+
+function checkReviewClaimComplete(claimPath) {
+  if (!checkFileExists(claimPath)) return false;
+  const claim = parseJsonFile(claimPath);
+  if (String(claim.mode || "") !== "review") return false;
+  if (typeof claim.review_score !== "number") return false;
+  if (!/^(Y|N)$/.test(String(claim.review_approval || "").toUpperCase())) return false;
+  const issues = Array.isArray(claim.review_issues) ? claim.review_issues : null;
+  if (!issues) return false;
+  if (claim.review_approval === "N" && issues.length === 0) return false;
+  if (typeof claim.review_summary !== "string" || claim.review_summary.trim().length < 20) return false;
+  return true;
+}
+
+function checkDeveloperHandoffGate(state, meta) {
+  if (meta.role !== "developer") return null;
+  if (meta.mode !== "review" && meta.mode !== "implement") return null;
+
+  const batch = (state.batches || []).find((b) => b && b.batch_id === meta.batch_id);
+  const item = batch && (batch.items || []).find((i) => i && i.item_id === meta.item_id);
+  if (!item) return null;
+
+  const plannerState = (item.roles || []).find((r) => r.role === "planner");
+  if (!plannerState || !plannerState.done_ticket || plannerState.done_ticket.status !== "issued") {
+    return `Developer ${meta.mode} blocked for ${meta.batch_id}/${meta.item_id}: planner done ticket missing. planner plan: 완료 전에 developer 진입 금지.`;
+  }
+  const plannerClaimPath = resolvePath(`workspace/claims/${meta.batch_id}/${meta.item_id}/planner.claim.json`);
+  if (!fs.existsSync(plannerClaimPath)) {
+    return `Developer ${meta.mode} blocked: planner.claim.json 부재. planner plan: 재실행 필요.`;
+  }
+  let plannerClaim;
+  try {
+    plannerClaim = JSON.parse(fs.readFileSync(plannerClaimPath, "utf8"));
+  } catch (e) {
+    return `Developer ${meta.mode} blocked: planner.claim.json 파싱 실패 (${e.message}).`;
+  }
+
+  const hasUserRaw = typeof plannerClaim.user_raw_request_quoted === "string" && plannerClaim.user_raw_request_quoted.trim().length > 0;
+  const hasReadLog = Array.isArray(plannerClaim.read_log) && plannerClaim.read_log.length >= 4;
+  const hasActionRationale = typeof plannerClaim.action_rationale === "string" && plannerClaim.action_rationale.trim().length > 0;
+  if (!hasUserRaw || !hasReadLog || !hasActionRationale) {
+    return `Developer ${meta.mode} blocked: planner.claim 에 plan 모드 필수 필드(user_raw_request_quoted/read_log≥4/action_rationale) 없음. planner plan: 을 먼저 돌려야 함 (revise 만 있는 비정상 상태).`;
+  }
+
+  const designerState = (item.roles || []).find((r) => r.role === "designer");
+  const designerRequired = String(plannerClaim.designer_required || "").toUpperCase();
+  const designerSkipIssued =
+    designerState && designerState.skip_ticket && designerState.skip_ticket.status === "issued";
+
+  if (designerSkipIssued) {
+    if (designerRequired !== "N") {
+      return `Developer ${meta.mode} blocked: designer skip_ticket 발급되어 있으나 planner.claim.designer_required=${designerRequired || "미정"}. skip 이 유효하려면 planner 가 N 을 명시해야 함.`;
+    }
+    const reason = typeof plannerClaim.design_reason === "string" ? plannerClaim.design_reason.trim() : "";
+    if (reason.length < 30) {
+      return `Developer ${meta.mode} blocked: designer skip 은 planner.claim.design_reason 30자 이상 사유 필요 (현재 ${reason.length}자).`;
+    }
+    return null;
+  }
+
+  if (designerRequired === "N") {
+    return null;
+  }
+
+  if (!designerState || !designerState.done_ticket || designerState.done_ticket.status !== "issued") {
+    return `Developer ${meta.mode} blocked: designer done ticket missing. designer apply: 완료 전에 developer 진입 금지.`;
+  }
+
+  const designerClaimPath = resolvePath(`workspace/claims/${meta.batch_id}/${meta.item_id}/designer.claim.json`);
+  if (!fs.existsSync(designerClaimPath)) {
+    return `Developer ${meta.mode} blocked: designer.claim.json 부재. designer apply: 재실행 필요.`;
+  }
+  let designerClaim;
+  try {
+    designerClaim = JSON.parse(fs.readFileSync(designerClaimPath, "utf8"));
+  } catch (e) {
+    return `Developer ${meta.mode} blocked: designer.claim.json 파싱 실패 (${e.message}).`;
+  }
+
+  const designerMode = String(designerClaim.mode || "").toLowerCase();
+  if (designerMode === "review") {
+    return `Developer ${meta.mode} blocked: designer 의 최신 claim 이 mode=review 다. design_* 생성은 아직 안 됐다. designer apply: 를 먼저 호출해야 함.`;
+  }
+
+  const designBoards = Array.isArray(designerClaim.design_boards) ? designerClaim.design_boards : [];
+  const action = String(designerClaim.action || "").toUpperCase();
+  if (action !== "NO_CHANGE" && designBoards.length === 0) {
+    return `Developer ${meta.mode} blocked: designer.claim.design_boards 비어 있음. design_* Board 없이 developer 진입 금지.`;
+  }
+
+  const devReady = String(designerClaim.developer_ready || "").toUpperCase();
+  if (devReady !== "Y") {
+    return `Developer ${meta.mode} blocked: designer.claim.developer_ready=${devReady || "미정"} (Y 필요).`;
+  }
+
+  if (meta.mode === "review") {
+    const designExportPath = resolvePath(`workspace/evidence/designer/${meta.batch_id}/${meta.item_id}/design-export.json`);
+    if (action !== "NO_CHANGE" && !fs.existsSync(designExportPath)) {
+      return `Developer review blocked: design-export.json 부재. designer apply 의 export_shape 시각 확인 증거 없음.`;
+    }
+  }
+
+  if (action !== "NO_CHANGE") {
+    if (!checkPenpotBoardsPresent(designerClaimPath, "designer")) {
+      return `Developer ${meta.mode} blocked: design_* Board 가 .penpot-boards.json 스냅샷에 없거나 30분 초과 stale. designer apply 후 Penpot Board 존재 스냅샷을 갱신해야 함.`;
+    }
+  }
+
+  return null;
+}
+
+function checkDesignerSkipValid(plannerClaimPath, workboardPath, itemId) {
+  if (!checkFileExists(plannerClaimPath)) return false;
+  const claim = parseJsonFile(plannerClaimPath);
+  const required = String(claim.designer_required || "").toUpperCase();
+  if (required !== "N") return true;
+  const reason = typeof claim.design_reason === "string" ? claim.design_reason.trim() : "";
+  if (reason.length < 30) return false;
+  const uiVisibleHints = [
+    /화면/, /레이아웃/, /버튼/, /입력/, /폼/, /리스트/, /목록/, /모달/, /드로어/,
+    /토스트/, /아이콘/, /색상/, /타이포/, /텍스트/, /배지/, /카드/, /배너/,
+  ];
+  const reqText = extractWorkboardRequestText(workboardPath, itemId) || "";
+  const combined = `${reqText}\n${typeof claim.planning_doc_sections === "string" ? claim.planning_doc_sections : ""}`;
+  if (uiVisibleHints.some((re) => re.test(reqText))) {
+    return false;
+  }
+  const action = String(claim.action || "").toUpperCase();
+  if (action !== "NO_CHANGE" && !/(서버|API|내부 로직|비UI|스키마|마이그레이션|환경설정)/.test(reason)) {
+    return false;
+  }
+  return true;
+}
+
+function checkDesignerCoversPlannerTargets(designerClaimPath, plannerClaimPath) {
+  if (!checkFileExists(designerClaimPath)) return false;
+  if (!checkFileExists(plannerClaimPath)) return false;
+  const dc = parseJsonFile(designerClaimPath);
+  const pc = parseJsonFile(plannerClaimPath);
+  const targets = Array.isArray(pc.design_target_boards) ? pc.design_target_boards : [];
+  const made = Array.isArray(dc.design_boards) ? dc.design_boards : [];
+  const targetNames = new Set(
+    targets
+      .map((t) => (typeof t === "string" ? t : t && t.board_name))
+      .filter(Boolean)
+  );
+  if (targetNames.size === 0) return true;
+  const madeNames = new Set(
+    made
+      .map((t) => (typeof t === "string" ? t : t && t.board_name))
+      .filter(Boolean)
+  );
+  for (const n of targetNames) {
+    if (!madeNames.has(n)) return false;
+  }
+  return true;
+}
+
+function checkDesignBoardsMatchWfBoards(designerClaimPath, plannerClaimPath) {
+  if (!checkFileExists(designerClaimPath)) return false;
+  if (!checkFileExists(plannerClaimPath)) return false;
+  const dc = parseJsonFile(designerClaimPath);
+  const pc = parseJsonFile(plannerClaimPath);
+  const wf = Array.isArray(pc.wf_boards) ? pc.wf_boards : [];
+  const design = Array.isArray(dc.design_boards) ? dc.design_boards : [];
+  if (wf.length === 0) return true;
+  const wfScreens = new Set(
+    wf
+      .map((b) => {
+        if (typeof b === "string") return b.replace(/^wf_/, "");
+        return b && (b.screen_id || (typeof b.board_name === "string" ? b.board_name.replace(/^wf_/, "") : null));
+      })
+      .filter(Boolean)
+  );
+  const designScreens = new Set(
+    design
+      .map((b) => {
+        if (typeof b === "string") return b.replace(/^design_/, "");
+        return b && (b.screen_id || (typeof b.board_name === "string" ? b.board_name.replace(/^design_/, "") : null));
+      })
+      .filter(Boolean)
+  );
+  for (const s of wfScreens) {
+    if (!designScreens.has(s)) return false;
+  }
+  return true;
+}
+
+function checkDeveloperReadyCrossCheck(designerClaimPath, plannerClaimPath) {
+  if (!checkFileExists(designerClaimPath)) return false;
+  const dc = parseJsonFile(designerClaimPath);
+  const devReady = String(dc.developer_ready || "").toUpperCase();
+  if (devReady !== "Y") return true;
+  const missing = Array.isArray(dc.missing_items) ? dc.missing_items : [];
+  if (missing.length > 0) return false;
+  if (!checkDesignerCoversPlannerTargets(designerClaimPath, plannerClaimPath)) return false;
+  if (!checkDesignBoardsMatchWfBoards(designerClaimPath, plannerClaimPath)) return false;
+  return true;
+}
+
+function checkLoopBReviewBundleComplete(batchId, itemId) {
+  const dir = `workspace/reviews/${batchId}/${itemId}`;
+  const assign = resolvePath(`${dir}/assignments.json`);
+  const anyExists = LOOP_B_REVIEW_FILES.some((n) => fs.existsSync(resolvePath(`${dir}/${n}`)));
+  if (!fs.existsSync(assign) && !anyExists) return true;
+  for (const name of LOOP_B_REVIEW_FILES) {
+    const p = resolvePath(`${dir}/${name}`);
+    if (!fs.existsSync(p)) return false;
+    const content = fs.readFileSync(p, "utf8");
+    if (content.trim().length < 120) return false;
+    for (const re of LOOP_B_REVIEW_REQUIRED_SECTIONS) {
+      if (!re.test(content)) return false;
+    }
+  }
+  return true;
+}
+
+const ASSIGNMENT_PLANNER_KEYWORDS = [
+  "기획", "스펙", "요구사항", "스코프", "흐름", "시나리오", "상태", "엣지", "예외",
+  "API", "권한", "데이터", "정의", "정책", "규칙", "문구", "문언", "라벨",
+  "screen_id", "비범위", "화면 목록", "동작", "로직",
+];
+const ASSIGNMENT_DESIGNER_KEYWORDS = [
+  "시각", "레이아웃", "정렬", "간격", "색상", "컬러", "타이포", "폰트", "그림자",
+  "아이콘", "일러스트", "여백", "패딩", "마진", "radius", "둥근", "배경", "오버레이",
+  "애니메이션", "트랜지션", "호버", "인터랙션", "반응형", "breakpoint",
+  "design_", "wf_", "desc_",
+];
+
+function classifyAssignmentTask(task) {
+  const text = `${task.summary || ""}`;
+  const plannerHits = ASSIGNMENT_PLANNER_KEYWORDS.filter((k) => text.includes(k)).length;
+  const designerHits = ASSIGNMENT_DESIGNER_KEYWORDS.filter((k) => text.includes(k)).length;
+  if (plannerHits > designerHits) return "planner";
+  if (designerHits > plannerHits) return "designer";
+  return "ambiguous";
+}
+
+function checkAssignmentsClassification(batchId, itemId) {
+  const p = resolvePath(`workspace/reviews/${batchId}/${itemId}/assignments.json`);
+  if (!fs.existsSync(p)) return true;
+  let obj;
+  try { obj = JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) { return false; }
+  const pl = Array.isArray(obj.planner_tasks) ? obj.planner_tasks : [];
+  const de = Array.isArray(obj.designer_tasks) ? obj.designer_tasks : [];
+  for (const t of pl) {
+    const c = classifyAssignmentTask(t);
+    if (c === "designer") return false;
+  }
+  for (const t of de) {
+    const c = classifyAssignmentTask(t);
+    if (c === "planner") return false;
+  }
+  return true;
+}
+
+function checkLoopBAssignmentsValid(batchId, itemId) {
+  const p = resolvePath(`workspace/reviews/${batchId}/${itemId}/assignments.json`);
+  if (!fs.existsSync(p)) return true;
+  let obj;
+  try {
+    obj = JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch (e) {
+    return false;
+  }
+  const pl = Array.isArray(obj.planner_tasks) ? obj.planner_tasks : null;
+  const de = Array.isArray(obj.designer_tasks) ? obj.designer_tasks : null;
+  const rationale = typeof obj.rationale === "string" ? obj.rationale.trim() : "";
+  if (!pl || !de) return false;
+  if (pl.length + de.length === 0) return false;
+  if (rationale.length < 20) return false;
+  const validOne = (task) =>
+    task &&
+    typeof task.id === "string" && task.id.length >= 2 &&
+    typeof task.source === "string" && /^(planner|designer|developer|qa)$/.test(task.source) &&
+    typeof task.summary === "string" && task.summary.trim().length >= 10;
+  return pl.every(validOne) && de.every(validOne);
+}
+
+function checkClaimProcessedAssignedTasks(claimPath, assignmentsPath, role) {
+  if (!checkFileExists(claimPath)) return false;
+  if (!checkFileExists(assignmentsPath)) return true;
+  const claim = parseJsonFile(claimPath);
+  const assign = parseJsonFile(assignmentsPath);
+  const key = role === "planner" ? "planner_tasks" : role === "designer" ? "designer_tasks" : null;
+  if (!key) return false;
+  const expected = Array.isArray(assign[key]) ? assign[key] : [];
+  const processed = Array.isArray(claim.assigned_task_ids) ? claim.assigned_task_ids : null;
+  if (!processed) return false;
+  const expectedIds = new Set(expected.map((t) => t && t.id).filter(Boolean));
+  for (const id of expectedIds) {
+    if (!processed.includes(id)) return false;
+  }
+  return true;
+}
+
 function checkLessonsLearnedAppendIfApplied(claimPath, lessonsPath, dispatchCreatedAt) {
   if (!checkFileExists(claimPath)) return false;
   const claim = parseJsonFile(claimPath);
@@ -2075,20 +2574,30 @@ function checkSnapshotPreservesIds(beforePath, afterPath) {
   const afterPayload = parseJsonFile(afterPath);
   const beforeItems = Array.isArray(beforePayload) ? beforePayload : [];
   const afterItems = Array.isArray(afterPayload) ? afterPayload : [];
-  const beforeIds = beforeItems
-    .map((entry) => (entry && typeof entry.id === "string" ? entry.id : null))
-    .filter(Boolean);
-  const afterIds = new Set(
-    afterItems
-      .map((entry) => (entry && typeof entry.id === "string" ? entry.id : null))
-      .filter(Boolean)
-  );
+  const indexAfter = new Map();
+  for (const entry of afterItems) {
+    if (entry && typeof entry.id === "string") indexAfter.set(entry.id, entry);
+  }
 
-  if (beforeIds.length === 0) {
+  if (beforeItems.length === 0) {
     return true;
   }
 
-  return beforeIds.every((id) => afterIds.has(id));
+  for (const be of beforeItems) {
+    if (!be || typeof be.id !== "string") continue;
+    const af = indexAfter.get(be.id);
+    if (!af) return false;
+    if (typeof be.name === "string" && typeof af.name === "string" && be.name !== af.name) return false;
+    if (typeof be.content_hash === "string" && typeof af.content_hash === "string" && be.content_hash !== af.content_hash) return false;
+    if (Number.isFinite(be.elements_count) && Number.isFinite(af.elements_count) && be.elements_count !== af.elements_count) return false;
+    if (Array.isArray(be.elements) && Array.isArray(af.elements)) {
+      const beIds = new Set(be.elements.map((e) => e && e.id).filter(Boolean));
+      for (const id of beIds) {
+        if (!af.elements.some((e) => e && e.id === id)) return false;
+      }
+    }
+  }
+  return true;
 }
 
 function loadChecklistDefinitions() {
@@ -2503,11 +3012,29 @@ const DISPATCH_PROMPT_REQUIREMENTS = {
     ],
     must_match: [/1\)/, /2\)/, /3\)/, /4\)/, /5\)/, /6\)/],
   },
+  "planner:review": {
+    must_include: [
+      "시작 순서 고정",
+      "A-planning-doc.md",
+      "wf_",
+      "desc_",
+      "design_",
+      "planner-review.md",
+      "UIUX 보완점",
+      "디스크립션",
+      "기획서 보완점",
+    ],
+    must_match: [/1\)/, /2\)/, /3\)/],
+  },
   "planner:revise": {
     must_include: [
       "시작 순서 고정",
       "developer-review.md",
       "qa-review.md",
+      "planner-review.md",
+      "designer-review.md",
+      "assignments.json",
+      "assigned_task_ids",
       "수긍",
       "반박",
       "wf-desc-snapshot-before",
@@ -2525,9 +3052,9 @@ const DISPATCH_PROMPT_REQUIREMENTS = {
       "request-workboard.md",
       "wf_",
       "desc_",
-      "A-uiux-review.md",
+      "UIUX",
     ],
-    must_match: [/1\)/, /2\)/, /3\)/],
+    must_match: [/1\)/, /2\)/, /3\)/, /A-uiux-review\.md|designer-review\.md/],
   },
   "designer:apply": {
     must_include: [
@@ -2538,6 +3065,8 @@ const DISPATCH_PROMPT_REQUIREMENTS = {
       "export_shape",
       "claim",
       "evidence",
+      "assignments.json",
+      "assigned_task_ids",
     ],
     must_match: [/1\)/, /2\)/, /3\)/, /4\)/, /5\)/],
   },
@@ -2549,6 +3078,9 @@ const DISPATCH_PROMPT_REQUIREMENTS = {
       "desc_",
       "design_",
       "developer-review.md",
+      "UIUX 보완점",
+      "디스크립션",
+      "기획서 보완점",
     ],
     must_match: [/1\)/, /2\)/, /3\)/],
   },
@@ -2575,6 +3107,9 @@ const DISPATCH_PROMPT_REQUIREMENTS = {
       "desc_",
       "design_",
       "qa-review.md",
+      "UIUX 보완점",
+      "디스크립션",
+      "기획서 보완점",
     ],
     must_match: [/1\)/, /2\)/, /3\)/],
   },
@@ -2612,26 +3147,57 @@ const DISPATCH_PROMPT_REQUIREMENTS = {
 };
 
 function checkReviseBundleAvailability(state, meta) {
-  if (meta.role !== "planner" || meta.mode !== "revise") return null;
   const batch = (state.batches || []).find((b) => b && b.batch_id === meta.batch_id);
   const item = batch && (batch.items || []).find((i) => i && i.item_id === meta.item_id);
   if (!item) return null;
   const gate = ensureReviewGate(item, meta.batch_id);
-  if (gate.status === "open" && gate.developer_review === "done" && gate.qa_review === "done") {
-    const devReview = resolvePath(`workspace/reviews/${meta.batch_id}/${meta.item_id}/developer-review.md`);
-    const qaReview = resolvePath(`workspace/reviews/${meta.batch_id}/${meta.item_id}/qa-review.md`);
-    const missing = [];
-    if (!fs.existsSync(devReview)) missing.push("workspace/reviews/{batch}/{item}/developer-review.md");
-    if (!fs.existsSync(qaReview)) missing.push("workspace/reviews/{batch}/{item}/qa-review.md");
-    if (missing.length) {
-      return `Loop B planner revise blocked for ${meta.batch_id}/${meta.item_id}: review bundle missing — ${missing.join(", ")}`;
+  const reviewDir = `workspace/reviews/${meta.batch_id}/${meta.item_id}`;
+
+  const inLoopB =
+    gate.status === "open" &&
+    gate.developer_review === "done" &&
+    gate.qa_review === "done";
+
+  if (meta.role === "planner" && meta.mode === "revise") {
+    if (inLoopB) {
+      const missing = [];
+      for (const name of LOOP_B_REVIEW_FILES) {
+        if (!fs.existsSync(resolvePath(`${reviewDir}/${name}`))) {
+          missing.push(`${reviewDir}/${name}`);
+        }
+      }
+      if (missing.length) {
+        return `Loop B planner revise blocked for ${meta.batch_id}/${meta.item_id}: 4-person review bundle incomplete — missing ${missing.join(", ")}. 모든 4인(planner/designer/developer/qa) review가 있어야 revise 가능.`;
+      }
+      if (!checkLoopBReviewBundleComplete(meta.batch_id, meta.item_id)) {
+        return `Loop B planner revise blocked: 4-person review bundle exists but missing required sections (UIUX 보완점 / 디스크립션(desc_*) 보완점 / 기획서 보완점) or bodies are < 120 chars.`;
+      }
+      const assignmentsPath = resolvePath(`${reviewDir}/assignments.json`);
+      if (!fs.existsSync(assignmentsPath)) {
+        return `Loop B planner revise blocked: ${reviewDir}/assignments.json missing. 메인 하네스가 4인 리뷰 내용을 planner_tasks / designer_tasks 로 분배해 기록해야 한다.`;
+      }
+      if (!checkLoopBAssignmentsValid(meta.batch_id, meta.item_id)) {
+        return `Loop B planner revise blocked: assignments.json 형식 오류. { planner_tasks:[{id,source,summary}], designer_tasks:[...], rationale }. summary ≥10자, rationale ≥20자, 최소 1개 task 필요.`;
+      }
+    } else if (gate.status === "idle" || gate.status === "resolved") {
+      const uxReview = resolvePath("workspace/design/A-uiux-review.md");
+      if (!fs.existsSync(uxReview)) {
+        return `Loop A-2 planner revise blocked: workspace/design/A-uiux-review.md missing — designer review must precede planner revise.`;
+      }
     }
-  } else if (gate.status === "idle" || gate.status === "resolved") {
-    const uxReview = resolvePath("workspace/design/A-uiux-review.md");
-    if (!fs.existsSync(uxReview)) {
-      return `Loop A-2 planner revise blocked: workspace/design/A-uiux-review.md missing — designer review must precede planner revise.`;
+    return null;
+  }
+
+  if (meta.role === "designer" && meta.mode === "apply" && inLoopB) {
+    const assignmentsPath = resolvePath(`${reviewDir}/assignments.json`);
+    if (!fs.existsSync(assignmentsPath)) {
+      return `Loop B designer apply (sync) blocked: ${reviewDir}/assignments.json missing.`;
+    }
+    if (!checkLoopBAssignmentsValid(meta.batch_id, meta.item_id)) {
+      return `Loop B designer apply (sync) blocked: assignments.json invalid.`;
     }
   }
+
   return null;
 }
 
@@ -2936,9 +3502,16 @@ function runChecklist(state, context, checklistEntries) {
   const filteredOut = [];
   const kept = checklistEntries
     .filter((entry) => {
-      const ok = !entry.when_mode || entry.when_mode === safeContext.mode;
-      if (!ok) filteredOut.push({ id: entry.id, reason: `when_mode ${entry.when_mode}` });
-      return ok;
+      if (entry.when_mode) {
+        const ok = entry.when_mode === safeContext.mode;
+        if (!ok) filteredOut.push({ id: entry.id, reason: `when_mode ${entry.when_mode}` });
+        return ok;
+      }
+      if (safeContext.mode === "review") {
+        filteredOut.push({ id: entry.id, reason: `${safeContext.role}:review skips checks without explicit when_mode=review` });
+        return false;
+      }
+      return true;
     })
     .filter((entry) => {
       if (!entry.when_action_not) return true;
@@ -3516,6 +4089,18 @@ async function handlePreToolUseAgent() {
       }
       return;
     }
+    const uxReviewPath = "workspace/design/A-uiux-review.md";
+    const gateOk = checkDesignerReviewScoreGate(uxReviewPath, null, 80);
+    const uxExists = fs.existsSync(resolvePath(uxReviewPath));
+    if (uxExists && !gateOk) {
+      saveState(state);
+      if (state.gate_mode === "enforce") {
+        stderrBlock(
+          `Loop A-3 designer apply blocked: ${uxReviewPath} 점수 80점 미만 또는 미기재. planner revise 후 designer review 재실행으로 80+ 받은 뒤 apply 가능.`
+        );
+      }
+      return;
+    }
   }
 
   const context = getStateContext(state, meta);
@@ -3617,6 +4202,17 @@ async function handlePreToolUseAgent() {
       );
     }
     return;
+  }
+
+  if (developerReview || developerImplement) {
+    const handoffError = checkDeveloperHandoffGate(state, meta);
+    if (handoffError) {
+      saveState(state);
+      if (state.gate_mode === "enforce") {
+        stderrBlock(handoffError);
+      }
+      return;
+    }
   }
 
   const recoveredEntries = recoverOpenDispatches(state);
@@ -3924,6 +4520,9 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
   if (!Array.isArray(reviewGate.designer_response_history)) {
     reviewGate.designer_response_history = [];
   }
+  if (!Number.isFinite(reviewGate.a2_iteration_count)) {
+    reviewGate.a2_iteration_count = 0;
+  }
 
   const isLoopBRevise =
     meta.role === "planner" &&
@@ -3943,6 +4542,18 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
       reviewGate.status = "awaiting_design_sync";
       reviewGate.resolved_at = null;
     }
+  } else if (
+    meta.role === "planner" &&
+    meta.mode === "revise" &&
+    (reviewGate.status === "idle" || reviewGate.status === "resolved")
+  ) {
+    reviewGate.a2_iteration_count = (reviewGate.a2_iteration_count || 0) + 1;
+  } else if (
+    meta.role === "designer" &&
+    meta.mode === "review" &&
+    (reviewGate.status === "idle" || reviewGate.status === "resolved")
+  ) {
+    reviewGate.a2_iteration_count = (reviewGate.a2_iteration_count || 0) + 1;
   }
 
   const isLoopBDesignerSync =
@@ -4451,6 +5062,7 @@ function handleNextAction() {
 
 const REVIEW_GATE_SYNC_TIMEOUT_MS = 30 * 60 * 1000;
 const LOOP_A2_REVISE_MAX = 5;
+const LOOP_B_REVISE_MAX = 3;
 
 function autoHoldStuckReviewGates(state) {
   const now = Date.now();
@@ -4472,15 +5084,26 @@ function autoHoldStuckReviewGates(state) {
         }
       }
 
-      const plannerAttempts = Array.isArray(gate.planner_response_history)
+      const loopBAttempts = Array.isArray(gate.planner_response_history)
         ? gate.planner_response_history.length
         : 0;
-      if (plannerAttempts >= LOOP_A2_REVISE_MAX) {
+      if (loopBAttempts >= LOOP_B_REVISE_MAX) {
+        upsertHold(
+          state,
+          "loop_b_revise_exhausted",
+          `Loop B planner revise exceeded ${LOOP_B_REVISE_MAX} iterations: ${batch.batch_id}/${item.item_id}`,
+          { batch_id: batch.batch_id, item_id: item.item_id, iterations: loopBAttempts },
+          "validator"
+        );
+      }
+
+      const a2Iterations = Number.isFinite(gate.a2_iteration_count) ? gate.a2_iteration_count : 0;
+      if (a2Iterations >= LOOP_A2_REVISE_MAX) {
         upsertHold(
           state,
           "loop_a2_revise_exhausted",
-          `Loop A-2 planner revise exceeded ${LOOP_A2_REVISE_MAX} iterations: ${batch.batch_id}/${item.item_id}`,
-          { batch_id: batch.batch_id, item_id: item.item_id, iterations: plannerAttempts },
+          `Loop A-2 iteration exceeded ${LOOP_A2_REVISE_MAX} (planner revise + designer review 합산): ${batch.batch_id}/${item.item_id}`,
+          { batch_id: batch.batch_id, item_id: item.item_id, iterations: a2Iterations },
           "validator"
         );
       }
@@ -4648,6 +5271,45 @@ function handleCheckInner(type, rest) {
       break;
     case "json_array_item_quality":
       ok = checkJsonArrayItemQuality(rest[0], rest[1]);
+      break;
+    case "loop_b_review_bundle_complete":
+      ok = checkLoopBReviewBundleComplete(rest[0], rest[1]);
+      break;
+    case "loop_b_assignments_valid":
+      ok = checkLoopBAssignmentsValid(rest[0], rest[1]);
+      break;
+    case "claim_processed_assigned_tasks":
+      ok = checkClaimProcessedAssignedTasks(rest[0], rest[1], rest[2]);
+      break;
+    case "assignments_classification":
+      ok = checkAssignmentsClassification(rest[0], rest[1]);
+      break;
+    case "designer_skip_valid":
+      ok = checkDesignerSkipValid(rest[0], rest[1], rest[2]);
+      break;
+    case "designer_covers_planner_targets":
+      ok = checkDesignerCoversPlannerTargets(rest[0], rest[1]);
+      break;
+    case "design_boards_match_wf_boards":
+      ok = checkDesignBoardsMatchWfBoards(rest[0], rest[1]);
+      break;
+    case "developer_ready_cross_check":
+      ok = checkDeveloperReadyCrossCheck(rest[0], rest[1]);
+      break;
+    case "designer_review_score_gate":
+      ok = checkDesignerReviewScoreGate(rest[0], rest[1], rest[2]);
+      break;
+    case "review_claim_complete":
+      ok = checkReviewClaimComplete(rest[0]);
+      break;
+    case "design_below_wf_desc":
+      ok = checkDesignBelowWfDesc(rest[0]);
+      break;
+    case "penpot_boards_present":
+      ok = checkPenpotBoardsPresent(rest[0], rest[1]);
+      break;
+    case "prior_review_addressed":
+      ok = checkPriorReviewAddressed(rest[0], rest[1], rest[2]);
       break;
     default:
       printJson({

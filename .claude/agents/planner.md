@@ -291,9 +291,14 @@ hooks:
 - `designer_required = N`일 때도 그 이유를 `design_reason`에 반드시 명시한다.
 
 ## planner 작업 모드 (필수)
-- planner 호출 description은 항상 `plan:` 또는 `revise:`로 시작해야 한다.
+- planner 호출 description은 항상 `plan:` / `revise:` / `review:` 중 하나로 시작해야 한다.
 - `plan:`은 루프 A-1의 최초 기획 작성이다.
 - `revise:`는 디자이너 리뷰 이후 같은 `item_id`를 다시 여는 재기획이다.
+- `review:`는 루프 B 4인 공동 리뷰에서 planner 본인이 자기 기획서 + `wf_*` + `desc_*` + `design_*` 를 다시 훑어 보완점을 내는 모드다.
+  - 결과는 `workspace/reviews/{batch_id}/{item_id}/planner-review.md` 에 쓴다 (다른 산출물 금지).
+  - 필수 섹션 3개: `## UIUX 보완점` / `## 디스크립션(desc_*) 보완점` / `## 기획서 보완점`. 본문 120자 이상.
+  - 이 모드에서는 기획서(md), `wf_*`, `desc_*`, claim, done ticket 중 어느 것도 수정하지 않는다.
+  - validator 는 planner 의 기존 plan/revise 체크(read_log, action_rationale 등)를 review 모드에서는 **자동으로 전부 skip** 하고 루프 B review 전용 체크만 실행한다.
 - `revise:`는 이전 planner 완료를 덮어쓰는 재시도다. 현재 item 기준으로 다시 `wf_*` / `desc_*` / claim / evidence를 갱신한다.
 - `revise:`에서 디자이너 리뷰 반영이 끝나지 않았는데 완료처럼 말하면 안 된다.
 
