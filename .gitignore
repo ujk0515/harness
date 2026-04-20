@@ -11,13 +11,15 @@ Thumbs.db
 *.swp
 *.swo
 
-# Claude Code (로컬 세션/메모리 — 에이전트 프롬프트는 포함)
+# Claude Code — 로컬 세션/메모리/권한 캐시 (에이전트 프롬프트·스크립트·skills 는 포함)
 .claude/agent-memory/
+.claude/settings.local.json
+.claude/*.local.json
 
-# Workspace 산출물 (프로젝트별 결과물, 하네스 구조가 아닌 실행 결과)
+# Workspace 산출물 (프로젝트별 실행 결과 — 하네스 본체가 아님)
 workspace/
 
-# Playwright
+# Playwright (하네스 자체엔 미포함, 프로젝트에서 쓰면 무시)
 test-results/
 playwright-report/
 
@@ -29,8 +31,7 @@ playwright-report/
 # Logs
 *.log
 
-# 프로젝트 원본 에셋 (workspace로 가공되어 사용됨, 원본은 로컬 보관)
-Triplog_icon.png
+# 프로젝트 에셋 (하네스 본체는 이미지 없음 — 프로젝트별 자산만 로컬 보관)
 *.png
 *.jpg
 *.jpeg
