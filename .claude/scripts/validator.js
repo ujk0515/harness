@@ -5130,6 +5130,190 @@ function handleParseSubject(subject) {
   });
 }
 
+// ── Planner composite checks (92→29 consolidation) ──────────────────────────
+
+function checkPlannerProcessReadsAll(transcriptPath) {
+  if (!hasTranscriptRead(transcriptPath, "workspace/planning/request-workboard.md")) return false;
+  if (!hasTranscriptRead(transcriptPath, "workspace/planning/project-config.md")) return false;
+  if (!hasTranscriptReadIfExists(transcriptPath, "workspace/planning/A-benchmark.md")) return false;
+  return true;
+}
+
+function checkPlannerProcessEvidenceAll(transcriptPath, batchId, itemId) {
+  const wfPath = `workspace/evidence/planner/${batchId}/${itemId}/wf-export.json`;
+  const descPath = `workspace/evidence/planner/${batchId}/${itemId}/desc-export.json`;
+  if (!hasTranscriptTouch(transcriptPath, wfPath)) return false;
+  if (!hasTranscriptTouch(transcriptPath, descPath)) return false;
+  return true;
+}
+
+function checkPlannerClaimFieldsAll(claimPath) {
+  if (!checkJsonFieldTruthy(claimPath, "export_shape_summary")) return false;
+  if (!checkJsonArrayMinSize(claimPath, "read_log", 4)) return false;
+  if (!checkJsonFieldTruthy(claimPath, "action_rationale")) return false;
+  if (!checkJsonArrayNonEmpty(claimPath, "planning_doc_sections")) return false;
+  if (!checkJsonFieldMatches(claimPath, "designer_required", "^(Y|N)$")) return false;
+  if (!checkJsonFieldTruthy(claimPath, "design_reason")) return false;
+  if (!checkJsonFieldMatches(claimPath, "developer_ready", "^(Y|N)$")) return false;
+  if (!checkJsonFieldMatches(claimPath, "tester_required", "^(Y|N)$")) return false;
+  if (!checkJsonFieldTruthy(claimPath, "tester_reason")) return false;
+  if (!checkJsonFieldTruthy(claimPath, "user_raw_request_quoted")) return false;
+  if (!checkJsonFieldTruthy(claimPath, "pre_review_applied")) return false;
+  return true;
+}
+
+function checkPlannerClaimArraysAll(claimPath) {
+  if (!checkJsonArrayMinSize(claimPath, "reference_flows", 2)) return false;
+  if (!checkJsonArrayItemMinLength(claimPath, "reference_flows", 15)) return false;
+  if (!checkJsonArrayNoDuplicates(claimPath, "reference_flows")) return false;
+  if (!checkJsonArrayItemQuality(claimPath, "reference_flows")) return false;
+  if (!checkJsonArrayMinSize(claimPath, "expected_user_path", 2)) return false;
+  if (!checkJsonArrayItemMinLength(claimPath, "expected_user_path", 10)) return false;
+  if (!checkJsonArrayItemQuality(claimPath, "expected_user_path")) return false;
+  if (!checkJsonArrayMinSize(claimPath, "critical_states", 2)) return false;
+  if (!checkJsonArrayItemMinLength(claimPath, "critical_states", 10)) return false;
+  if (!checkJsonArrayItemQuality(claimPath, "critical_states")) return false;
+  if (!checkJsonArrayMinSize(claimPath, "avoid_patterns", 2)) return false;
+  if (!checkJsonArrayItemMinLength(claimPath, "avoid_patterns", 15)) return false;
+  if (!checkJsonArrayNoDuplicates(claimPath, "avoid_patterns")) return false;
+  if (!checkJsonArrayItemQuality(claimPath, "avoid_patterns")) return false;
+  return true;
+}
+
+function checkPlannerWfExportValid(evidencePath, dispatchCreatedAt) {
+  if (!checkMtimeAfter(evidencePath, dispatchCreatedAt)) return false;
+  if (!checkJsonFieldEquals(evidencePath, "type", "wf_export")) return false;
+  if (!checkJsonFieldTruthy(evidencePath, "board_id")) return false;
+  if (!checkJsonFieldMatches(evidencePath, "board_name", "^wf_")) return false;
+  return true;
+}
+
+function checkPlannerDescExportValid(evidencePath, dispatchCreatedAt) {
+  if (!checkMtimeAfter(evidencePath, dispatchCreatedAt)) return false;
+  if (!checkJsonFieldEquals(evidencePath, "type", "desc_export")) return false;
+  if (!checkJsonFieldTruthy(evidencePath, "board_id")) return false;
+  if (!checkJsonFieldMatches(evidencePath, "board_name", "^desc_")) return false;
+  return true;
+}
+
+function checkPlannerBoardsValid(claimPath, docPath, evidenceDir, itemId) {
+  if (!checkWfDescPairMatch(claimPath)) return false;
+  if (!checkBoardNameMatchesItem(claimPath, itemId)) return false;
+  if (!checkActionConsistency(claimPath)) return false;
+  try {
+    const claim = parseJsonFile(claimPath);
+    if (claim.action !== "NO_CHANGE") {
+      if (!checkWfBoardsMatchPlanningDoc(claimPath, docPath)) return false;
+      if (!checkMultiScreenEvidenceExists(claimPath, evidenceDir)) return false;
+      if (!checkRetryPreservesBoardIds(evidenceDir)) return false;
+    }
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+function checkPlannerPlanningDocValid(docPath, hashLogPath) {
+  if (!checkPlanningDocSections(docPath)) return false;
+  if (!checkHashRecordAndCompare(docPath, hashLogPath)) return false;
+  return true;
+}
+
+function checkPlannerRoutingValid(claimPath, workboardPath, itemId) {
+  if (!checkDesignerSkipValid(claimPath, workboardPath, itemId)) return false;
+  if (!checkTesterRequiredConsistency(claimPath)) return false;
+  return true;
+}
+
+function checkPlannerRequestCoverageAll(claimPath, workboardPath, itemId, docPath) {
+  if (!checkRequestCoverageValid(claimPath)) return false;
+  try {
+    const claim = parseJsonFile(claimPath);
+    if (claim.action !== "NO_CHANGE") {
+      if (!checkRequestCoverageCrossCheck(workboardPath, itemId, docPath)) return false;
+    }
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+function checkPlannerPreReviewBundle(claimPath, preReviewPath) {
+  if (!checkUserRawRequestMatch(claimPath, preReviewPath)) return false;
+  if (!checkPreReviewQaApplied(claimPath, preReviewPath)) return false;
+  return true;
+}
+
+function checkPlannerReviseBundle(transcriptPath, claimPath, uiuxReviewPath, planningDocPath, reviewsDir) {
+  if (!hasTranscriptReadIfExists(transcriptPath, uiuxReviewPath)) return false;
+  if (!hasTranscriptReadIfExists(transcriptPath, `${reviewsDir}/developer-review.md`)) return false;
+  if (!hasTranscriptReadIfExists(transcriptPath, `${reviewsDir}/qa-review.md`)) return false;
+  if (!checkPriorReviewAddressed(uiuxReviewPath, planningDocPath, claimPath)) return false;
+  if (!checkJsonArrayNonEmpty(claimPath, "review_response_decisions")) return false;
+  if (!checkJsonFieldTruthy(claimPath, "review_source")) return false;
+  return true;
+}
+
+function checkPlannerLoopBReviseBundle(batchId, itemId, claimPath) {
+  if (!checkLoopBReviewBundleComplete(batchId, itemId)) return false;
+  if (!checkLoopBAssignmentsValid(batchId, itemId)) return false;
+  if (!checkAssignmentsClassification(batchId, itemId)) return false;
+  const assignmentsPath = `workspace/reviews/${batchId}/${itemId}/assignments.json`;
+  if (!checkClaimProcessedAssignedTasks(claimPath, assignmentsPath, "planner")) return false;
+  return true;
+}
+
+function checkPlannerReviewBundle(reviewFilePath, dispatchCreatedAt) {
+  if (!checkFileExists(reviewFilePath)) return false;
+  if (!checkFileContains(reviewFilePath, "UIUX 보완점")) return false;
+  if (!checkFileContains(reviewFilePath, "디스크립션")) return false;
+  if (!checkFileContains(reviewFilePath, "기획서 보완점")) return false;
+  if (!checkMtimeAfter(reviewFilePath, dispatchCreatedAt)) return false;
+  return true;
+}
+
+// ── Designer composite checks (32→19 consolidation) ─────────────────────────
+
+function checkDesignerProcessCommonReads(transcriptPath) {
+  if (!hasTranscriptRead(transcriptPath, "workspace/planning/request-workboard.md")) return false;
+  if (!hasTranscriptRead(transcriptPath, "workspace/planning/A-planning-doc.md")) return false;
+  return true;
+}
+
+function checkDesignerProcessApplyWrites(transcriptPath, batchId, itemId) {
+  const exportPath = `workspace/evidence/designer/${batchId}/${itemId}/design-export.json`;
+  const boardsPath = `workspace/evidence/designer/${batchId}/${itemId}/boards.json`;
+  const claimPath = `workspace/claims/${batchId}/${itemId}/designer.claim.json`;
+  if (!hasTranscriptTouch(transcriptPath, exportPath)) return false;
+  if (!hasTranscriptTouch(transcriptPath, boardsPath)) return false;
+  if (!hasTranscriptTouchAfter(transcriptPath, exportPath, claimPath)) return false;
+  return true;
+}
+
+function checkDesignerApplyClaimFields(claimPath) {
+  if (!checkJsonFieldEquals(claimPath, "developer_ready", "Y")) return false;
+  if (!checkJsonArrayNonEmpty(claimPath, "developer_targets")) return false;
+  if (!checkJsonArrayNonEmpty(claimPath, "design_boards")) return false;
+  if (!checkJsonArrayEmpty(claimPath, "missing_items")) return false;
+  return true;
+}
+
+function checkDesignerDesignExportValid(evidencePath, dispatchCreatedAt) {
+  if (!checkMtimeAfter(evidencePath, dispatchCreatedAt)) return false;
+  if (!checkJsonFieldEquals(evidencePath, "type", "design_export")) return false;
+  if (!checkJsonFieldTruthy(evidencePath, "board_id")) return false;
+  if (!checkJsonFieldMatches(evidencePath, "board_name", "^design_")) return false;
+  return true;
+}
+
+function checkDesignerBoardsManifestValid(boardsPath, dispatchCreatedAt) {
+  if (!checkMtimeAfter(boardsPath, dispatchCreatedAt)) return false;
+  if (!checkJsonArrayNonEmpty(boardsPath, "design_boards")) return false;
+  return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function handleCheck(args) {
   const [type, ...rest] = args;
 
@@ -5310,6 +5494,63 @@ function handleCheckInner(type, rest) {
       break;
     case "prior_review_addressed":
       ok = checkPriorReviewAddressed(rest[0], rest[1], rest[2]);
+      break;
+    case "planner_process_reads_all":
+      ok = checkPlannerProcessReadsAll(rest[0]);
+      break;
+    case "planner_process_evidence_all":
+      ok = checkPlannerProcessEvidenceAll(rest[0], rest[1], rest[2]);
+      break;
+    case "planner_claim_fields_all":
+      ok = checkPlannerClaimFieldsAll(rest[0]);
+      break;
+    case "planner_claim_arrays_all":
+      ok = checkPlannerClaimArraysAll(rest[0]);
+      break;
+    case "planner_wf_export_valid":
+      ok = checkPlannerWfExportValid(rest[0], rest[1]);
+      break;
+    case "planner_desc_export_valid":
+      ok = checkPlannerDescExportValid(rest[0], rest[1]);
+      break;
+    case "planner_boards_valid":
+      ok = checkPlannerBoardsValid(rest[0], rest[1], rest[2], rest[3]);
+      break;
+    case "planner_planning_doc_valid":
+      ok = checkPlannerPlanningDocValid(rest[0], rest[1]);
+      break;
+    case "planner_routing_valid":
+      ok = checkPlannerRoutingValid(rest[0], rest[1], rest[2]);
+      break;
+    case "planner_request_coverage_all":
+      ok = checkPlannerRequestCoverageAll(rest[0], rest[1], rest[2], rest[3]);
+      break;
+    case "planner_pre_review_bundle":
+      ok = checkPlannerPreReviewBundle(rest[0], rest[1]);
+      break;
+    case "planner_revise_bundle":
+      ok = checkPlannerReviseBundle(rest[0], rest[1], rest[2], rest[3], rest[4]);
+      break;
+    case "planner_loop_b_revise_bundle":
+      ok = checkPlannerLoopBReviseBundle(rest[0], rest[1], rest[2]);
+      break;
+    case "planner_review_bundle":
+      ok = checkPlannerReviewBundle(rest[0], rest[1]);
+      break;
+    case "designer_process_common_reads":
+      ok = checkDesignerProcessCommonReads(rest[0]);
+      break;
+    case "designer_process_apply_writes":
+      ok = checkDesignerProcessApplyWrites(rest[0], rest[1], rest[2]);
+      break;
+    case "designer_apply_claim_fields":
+      ok = checkDesignerApplyClaimFields(rest[0]);
+      break;
+    case "designer_design_export_valid":
+      ok = checkDesignerDesignExportValid(rest[0], rest[1]);
+      break;
+    case "designer_boards_manifest_valid":
+      ok = checkDesignerBoardsManifestValid(rest[0], rest[1]);
       break;
     default:
       printJson({

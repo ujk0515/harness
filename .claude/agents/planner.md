@@ -29,6 +29,7 @@ hooks:
    - `workflow/standards/planning-doc-sections.md`
    - `.claude/skills/planner-workflow/references/sequence.md`
    - `workflow/references/planner-penpot-reference.md`
+   - **토큰 절약 규칙 (필수):** 모든 파일은 **1회만 Read**. 재기획(revise)에서 기존 `A-planning-doc.md` 를 확인할 때는 **1회만** Read 하고, 필요한 섹션만 `offset`/`limit` 으로 부분 읽기. 같은 파일을 두 번 이상 Read 하지 말 것 — 대용량 파일(A-planning-doc.md 는 50KB 이상일 수 있음) 반복 Read 는 claim/evidence 쓰기 전에 토큰 고갈을 유발한다.
 2. 영향도 분석
    - 기존 `screen_id`, `wf_*`, `desc_*`, `design_*`를 파악한다.
    - **수집 방법 강제:** `penpot.execute_code`로 현재 페이지의 모든 Board `{ id, name, type }` 목록을 가져와 `workspace/evidence/planner/{batch_id}/{item_id}/boards-snapshot.json` 에 저장한다. 이 스냅샷 없이 영향도 분석을 끝내면 안 된다.

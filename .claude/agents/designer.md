@@ -33,6 +33,7 @@ hooks:
   4. claim / evidence / 자가 점검까지 끝내기 전에는 완료처럼 말하지 않는다.
 - blocked 재호출이면 `request-state.json`의 designer `failed_check_ids` / `retry_scope`를 먼저 읽고 실패한 체크 항목만 보완한다.
 - 이미 `pass`한 항목은 처음부터 다시 하지 않는다.
+- **토큰 절약 규칙 (필수):** 모든 입력 파일은 **1회만 Read**. 특히 `A-planning-doc.md` 는 50KB 이상일 수 있으므로 **첫 Read 1회** 로 끝내고, 이후 필요한 섹션만 `offset`/`limit` 으로 부분 읽기. 같은 파일 반복 Read 는 claim/evidence 쓰기 단계 전에 토큰 고갈을 유발하므로 금지.
 
 ## 핵심 원칙
 - 기획은 하지 않는다. UX 리뷰와 UI 디자인만 한다.

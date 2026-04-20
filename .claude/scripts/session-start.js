@@ -91,6 +91,7 @@ const reminder = [
   '  4) UPDATE / CREATE / UPDATE+CREATE / NO_CHANGE 판별 + action_rationale 기록',
   '  5) 기획서(md, 표준 8개 섹션) 작성 + 사전 검토 답변 반영 → wf_* / desc_* 생성 → export_shape 확인',
   '  6) gap check + 디자이너 가이드 + claim(read_log/action_rationale/pre_review_applied/user_raw_request_quoted/planning_doc_sections 포함) + 자가점검',
+  '  7) **토큰 절약 규칙 (필수):** 모든 입력 파일은 **1회만 Read**. 특히 `A-planning-doc.md` 는 50KB 이상일 수 있으므로, 재기획(revise)에서 기존 내용을 확인할 때 **첫 Read 1회** 로 끝내고, 이후 필요한 섹션만 `offset`/`limit` 으로 부분 읽기. 같은 파일 반복 Read 는 claim/evidence 쓰기 단계 전에 토큰 고갈을 유발하므로 금지.',
   '- 위 단계 / 요소 중 하나라도 prompt 에서 누락되면 validator 가 차단한다.',
   '',
   '### 메인 하네스 자체 체크 (작업 보드 생성 직후, planner 호출 직전)',
