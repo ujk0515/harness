@@ -4,6 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const processPath = path.join(projectDir, 'workflow', 'process.md');
@@ -47,9 +48,65 @@ function sliceSection(startHeading, endHeadings) {
 
 const projectStartRules = sliceSection('## 프로젝트 시작 규칙', ['## 산출물 포맷 규칙', '## 작업 보드 관리 규칙', '## Penpot 준비 가드', '# 하네스 동작 규칙']);
 
+function runValidatorJson(args) {
+  try {
+    const validatorPath = path.join(projectDir, '.claude', 'scripts', 'validator.js');
+    const result = spawnSync(process.execPath, [validatorPath, ...args], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      timeout: 10000,
+    });
+    if (result.status !== 0) return null;
+    return JSON.parse((result.stdout || '').trim() || '{}');
+  } catch (err) {
+    process.stderr.write(`[session-start] validator ${args.join(' ')} failed: ${err.message}\n`);
+    return null;
+  }
+}
+
+function buildResumeSummary() {
+  runValidatorJson(['refresh-live-status']);
+  const next = runValidatorJson(['next-action']);
+  if (!next || !next.next_action) return [];
+
+  const action = next.next_action;
+  const lines = [
+    '## 재개 우선 규칙 (resume-aware)',
+    '- 세션이 다시 시작되거나 컨텍스트가 압축된 뒤에는 **신규 요청처럼 다시 시작하지 말고** 현재 진행 중인 하네스 상태를 먼저 따른다.',
+    `- current_batch_id: ${next.current_batch_id || '-'}`,
+    `- next_action: ${action.action || '-'}`,
+    `- response_allowed: ${String(action.response_allowed)}`,
+    `- reason: ${action.reason || '-'}`,
+  ];
+
+  if (action.batch_id || action.item_id) {
+    lines.push(`- current_item: ${action.batch_id || '-'} / ${action.item_id || '-'}`);
+  }
+  if (action.role || action.mode) {
+    lines.push(`- current_role_mode: ${action.role || '-'} / ${action.mode || '-'}`);
+  }
+  if (action.description) {
+    lines.push(`- suggested_description: ${action.description}`);
+  }
+  if (action.hold && action.hold.code) {
+    lines.push(`- open_hold: ${action.hold.code}`);
+  }
+
+  lines.push('- `next_action.action = dispatch` 이면 사용자에게 답하지 말고 해당 Agent 를 즉시 호출한다.');
+  lines.push('- `next_action.action = active_agent` 이면 사용자에게 답하지 말고 `refresh-live-status -> next-action` 을 다시 확인해 정리/재개한다.');
+  lines.push('- `next_action.action = halt` 일 때만 사용자에게 상황을 설명하고 답을 기다린다.');
+  lines.push('- `next_action.response_allowed = false` 면 사용자 응답 금지. 내부 루프를 재개한다.');
+  lines.push('');
+
+  return lines;
+}
+
+const resumeSummary = buildResumeSummary();
+
 const reminder = [
   '# 하네스 세션 시작 규칙 (자동 주입)',
   '',
+  ...resumeSummary,
   '사용자가 자연어로 "무엇을 만들어줘" / 기획 내용을 전달하면, **에이전트를 호출하기 전에 반드시 아래 시작 흐름을 먼저 수행**한다.',
   '',
   '- 필수 항목(플랫폼, 기술 스택)이 빠졌으면 → 누락 항목만 물어보고 `hold-open missing_requirements`로 기록 후 멈춘다.',
