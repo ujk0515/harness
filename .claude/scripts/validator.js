@@ -3574,6 +3574,73 @@ function runChecklist(state, context, checklistEntries) {
   });
 }
 
+function shouldUsePartialChecklistRetry(roleState) {
+  return Boolean(
+    roleState &&
+      roleState.status === "blocked" &&
+      Array.isArray(roleState.failed_check_ids) &&
+      roleState.failed_check_ids.length > 0 &&
+      Array.isArray(roleState.checklist) &&
+      roleState.checklist.length > 0
+  );
+}
+
+function buildChecklistRetryPlan(roleState, checks) {
+  const usePartialRetry = shouldUsePartialChecklistRetry(roleState);
+  if (!usePartialRetry) {
+    return {
+      usePartialRetry: false,
+      checksToRun: checks,
+      previousChecklist: [],
+    };
+  }
+
+  const failedIds = new Set(roleState.failed_check_ids || []);
+  return {
+    usePartialRetry: true,
+    checksToRun: checks.filter((entry) => failedIds.has(entry.id)),
+    previousChecklist: Array.isArray(roleState.checklist) ? roleState.checklist : [],
+  };
+}
+
+function normalizeChecklistResult(entry) {
+  return {
+    id: entry.id,
+    label: entry.label,
+    command: entry.command,
+    status: entry.status,
+    evidence_paths: Array.isArray(entry.evidence_paths) ? entry.evidence_paths : [],
+  };
+}
+
+function mergeChecklistResults(previousChecklist, freshResults, allChecks) {
+  const previousMap = new Map(
+    (previousChecklist || []).map((entry) => [entry.id, normalizeChecklistResult(entry)])
+  );
+  const freshMap = new Map(
+    (freshResults || []).map((entry) => [entry.id, normalizeChecklistResult(entry)])
+  );
+
+  return allChecks
+    .map((entry) => {
+      if (freshMap.has(entry.id)) {
+        return freshMap.get(entry.id);
+      }
+
+      const previous = previousMap.get(entry.id);
+      if (previous && previous.status === "pass") {
+        return previous;
+      }
+
+      if (previous) {
+        return previous;
+      }
+
+      return null;
+    })
+    .filter(Boolean);
+}
+
 function writeTicket(state, meta, ticketKind, payload, suffix) {
   const filePath = getTicketPath(state, meta, ticketKind, suffix);
   writeJsonFile(filePath, payload);
@@ -3788,6 +3855,7 @@ async function handleTaskCompleted() {
   const checks = checklistDefinitions.roles[meta.role] || [];
   const predecessorFailures = collectPredecessorFailures(context.item, meta.role);
   const retryLimit = context.item.retry_limit || 3;
+  const retryPlan = buildChecklistRetryPlan(context.roleState, checks);
 
   context.roleState.attempt += 1;
   context.roleState.claim_path = path.relative(resolveProjectRoot(), getClaimPath(state, meta));
@@ -3802,21 +3870,18 @@ async function handleTaskCompleted() {
     batch_id: meta.batch_id,
     item_id: meta.item_id,
     role: meta.role,
-    mode: dispatchEntry.mode || "",
+    mode: meta.mode || "",
     batch_index: context.batchIndex,
     item_index: context.itemIndex,
     role_index: context.roleIndex,
   };
-  const results = runChecklist(state, checklistContext, checks);
-  context.roleState.checklist = results.map((entry) => ({
-    id: entry.id,
-    label: entry.label,
-    command: entry.command,
-    status: entry.status,
-    evidence_paths: entry.evidence_paths,
-  }));
+  const freshResults = runChecklist(state, checklistContext, retryPlan.checksToRun);
+  const mergedResults = retryPlan.usePartialRetry
+    ? mergeChecklistResults(retryPlan.previousChecklist, freshResults, checks)
+    : freshResults.map((entry) => normalizeChecklistResult(entry));
+  context.roleState.checklist = mergedResults;
 
-  const failedChecks = results.filter((entry) => entry.status !== "pass");
+  const failedChecks = mergedResults.filter((entry) => entry.status !== "pass");
   const failures = [
     ...predecessorFailures,
     ...failedChecks.map((entry) => `${entry.id}: ${entry.label}`),
@@ -4377,6 +4442,7 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
   const checks = checklistDefinitions.roles[meta.role] || [];
   const predecessorFailures = collectPredecessorFailures(context.item, meta.role);
   const retryLimit = context.item.retry_limit || 3;
+  const retryPlan = buildChecklistRetryPlan(context.roleState, checks);
   const checklistContext = {
     batch_id: meta.batch_id,
     item_id: meta.item_id,
@@ -4416,19 +4482,16 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
   context.roleState.attempts_by_mode[modeKey] = (context.roleState.attempts_by_mode[modeKey] || 0) + 1;
   saveState(state);
 
-  const results = runChecklist(state, checklistContext, checks);
+  const freshResults = runChecklist(state, checklistContext, retryPlan.checksToRun);
+  const mergedResults = retryPlan.usePartialRetry
+    ? mergeChecklistResults(retryPlan.previousChecklist, freshResults, checks)
+    : freshResults.map((entry) => normalizeChecklistResult(entry));
   context.roleState.attempt = (context.roleState.attempts_by_mode[modeKey] || 1);
   context.roleState.failed_check_ids = [];
   context.roleState.retry_scope = [];
-  context.roleState.checklist = results.map((entry) => ({
-    id: entry.id,
-    label: entry.label,
-    command: entry.command,
-    status: entry.status,
-    evidence_paths: entry.evidence_paths,
-  }));
+  context.roleState.checklist = mergedResults;
 
-  const failedChecks = results.filter((entry) => entry.status !== "pass");
+  const failedChecks = mergedResults.filter((entry) => entry.status !== "pass");
   const failures = [
     ...predecessorFailures,
     ...failedChecks.map((entry) => `${entry.id}: ${entry.label}`),
