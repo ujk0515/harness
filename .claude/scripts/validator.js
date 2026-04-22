@@ -711,30 +711,75 @@ function chooseNextActionForItem(state, batch, item) {
   return null;
 }
 
+function isGlobalHold(hold) {
+  return !hold || !hold.details || !hold.details.batch_id;
+}
+
+function holdAppliesToBatch(hold, batchId) {
+  if (isGlobalHold(hold)) {
+    return true;
+  }
+  if (!batchId) {
+    return false;
+  }
+  return hold.details.batch_id === batchId;
+}
+
+function holdAppliesToDispatch(hold, dispatch) {
+  if (!dispatch) {
+    return false;
+  }
+  if (isGlobalHold(hold)) {
+    return true;
+  }
+  if (hold.details.batch_id !== dispatch.batch_id) {
+    return false;
+  }
+  if (hold.details.item_id && dispatch.item_id && hold.details.item_id !== dispatch.item_id) {
+    return false;
+  }
+  if (hold.details.role && dispatch.role && hold.details.role !== dispatch.role) {
+    return false;
+  }
+  return true;
+}
+
 function buildNextAction(state) {
   const openHolds = getOpenHolds(state);
-  if (openHolds.length > 0) {
-    const hold = openHolds[0];
-    return {
-      action: "halt",
-      response_allowed: true,
-      reason: hold.reason || hold.code,
-      hold,
-    };
-  }
-
   const dispatchState = loadDispatchState(state);
   const openDispatches = summarizeOpenDispatches(dispatchState);
-  if (openDispatches.length > 0) {
+  const activeDispatch = openDispatches[0] || null;
+
+  if (activeDispatch) {
+    const dispatchHold = openHolds.find((hold) => holdAppliesToDispatch(hold, activeDispatch));
+    if (dispatchHold) {
+      return {
+        action: "halt",
+        response_allowed: true,
+        reason: dispatchHold.reason || dispatchHold.code,
+        hold: dispatchHold,
+      };
+    }
+
     return {
       action: "active_agent",
       response_allowed: false,
       reason: "foreground agent step still in progress",
-      active_dispatch: openDispatches[0],
+      active_dispatch: activeDispatch,
     };
   }
 
   const batch = getCurrentBatch(state);
+  const batchHold = openHolds.find((hold) => holdAppliesToBatch(hold, batch ? batch.batch_id : null));
+  if (batchHold) {
+    return {
+      action: "halt",
+      response_allowed: true,
+      reason: batchHold.reason || batchHold.code,
+      hold: batchHold,
+    };
+  }
+
   if (!batch) {
     return {
       action: "idle",
