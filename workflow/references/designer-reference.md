@@ -71,6 +71,8 @@
 - 새 `design_*` 만들기 전에 같은 페이지의 기존 `design_*`를 먼저 본다.
 - `Flex Layout`은 쓰지 않는다. 절대 좌표로 배치한다.
 - 텍스트는 항상 `resize + auto-height`.
+- 한 dispatch 전체 기준 `execute_code`는 최대 5회, `export_shape`는 최대 2회까지만 사용한다.
+- 보드 전체 재작성 대신 변경된 블록만 작게 수정한다.
 
 ```javascript
 const text = penpot.createText("제목");

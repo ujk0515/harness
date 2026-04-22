@@ -20,6 +20,7 @@ const DISPATCH_SCHEMA_VERSION = "1.0.0-draft";
 const DISPATCH_TERMINAL_STATUSES = new Set(["completed", "blocked", "rejected"]);
 const STALE_PENDING_WITHOUT_AGENT_MS = 30 * 1000;
 const STALE_CLAIMED_WITHOUT_STOP_MS = 3 * 1000;
+const ACTIVE_AGENT_TRANSCRIPT_IDLE_MS = 15 * 60 * 1000;
 
 function readStdin() {
   return new Promise((resolve, reject) => {
@@ -355,6 +356,7 @@ function summarizeOpenDispatches(dispatchState) {
   return (dispatchState.entries || [])
     .filter((entry) => entry && !DISPATCH_TERMINAL_STATUSES.has(entry.status))
     .map((entry) => ({
+      session_id: entry.session_id || null,
       batch_id: entry.batch_id || null,
       item_id: entry.item_id || null,
       role: entry.role || null,
@@ -368,6 +370,62 @@ function summarizeOpenDispatches(dispatchState) {
       running_for: elapsedLabel(entry.claimed_at || entry.created_at || null),
       stop_reason: entry.stop_reason || null,
     }));
+}
+
+function getDispatchTranscriptIdleMs(dispatch) {
+  if (!dispatch || !dispatch.session_id || !dispatch.agent_id) {
+    return Infinity;
+  }
+
+  const transcriptPath = inferAgentTranscriptPath(dispatch.session_id, dispatch.agent_id);
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) {
+    return Infinity;
+  }
+
+  try {
+    const stat = fs.statSync(transcriptPath);
+    return Math.max(0, Date.now() - stat.mtimeMs);
+  } catch (error) {
+    return Infinity;
+  }
+}
+
+function isDispatchSupersededByState(state, dispatch) {
+  if (!dispatch || dispatch.status !== "claimed") {
+    return false;
+  }
+
+  const claimedAt = Date.parse(dispatch.claimed_at || dispatch.created_at || "");
+  if (Number.isNaN(claimedAt) || Date.now() - claimedAt <= STALE_CLAIMED_WITHOUT_STOP_MS) {
+    return false;
+  }
+
+  const transcriptIdleMs = getDispatchTranscriptIdleMs(dispatch);
+  if (Number.isFinite(transcriptIdleMs) && transcriptIdleMs <= ACTIVE_AGENT_TRANSCRIPT_IDLE_MS) {
+    return false;
+  }
+
+  const meta = {
+    batch_id: dispatch.batch_id,
+    item_id: dispatch.item_id,
+    role: dispatch.role,
+    summary: dispatch.description || "",
+  };
+  const context = getStateContext(state, meta);
+  const roleState = context.roleState;
+  const currentBatch = getCurrentBatch(state);
+  const roleResolved =
+    hasIssuedTicket(roleState) ||
+    roleState.status === "done" ||
+    roleState.status === "skipped";
+  const batchSuperseded =
+    !!(currentBatch && currentBatch.batch_id && dispatch.batch_id && currentBatch.batch_id !== dispatch.batch_id);
+
+  return roleResolved || batchSuperseded;
+}
+
+function summarizeActionableOpenDispatches(state, dispatchState) {
+  return summarizeOpenDispatches(dispatchState).filter((dispatch) => !isDispatchSupersededByState(state, dispatch));
 }
 
 function summarizeBlockedItems(state) {
@@ -747,7 +805,7 @@ function holdAppliesToDispatch(hold, dispatch) {
 function buildNextAction(state) {
   const openHolds = getOpenHolds(state);
   const dispatchState = loadDispatchState(state);
-  const openDispatches = summarizeOpenDispatches(dispatchState);
+  const openDispatches = summarizeActionableOpenDispatches(state, dispatchState);
   const activeDispatch = openDispatches[0] || null;
 
   if (activeDispatch) {
@@ -808,7 +866,7 @@ function buildNextAction(state) {
 
 function buildLiveStatus(state) {
   const dispatchState = loadDispatchState(state);
-  const openDispatches = summarizeOpenDispatches(dispatchState);
+  const openDispatches = summarizeActionableOpenDispatches(state, dispatchState);
   const activeDispatch = openDispatches[0] || null;
   const nextAction = buildNextAction(state);
   const currentBatch = getCurrentBatch(state);
@@ -2582,6 +2640,29 @@ function getTranscriptExecuteCodeBlocks(transcriptPath) {
         typeof toolUse.input.code === "string"
     )
     .map((toolUse) => toolUse.input.code);
+}
+
+function summarizeTranscriptToolUsage(transcriptPath) {
+  const toolUses = readTranscriptToolUses(transcriptPath);
+  const counts = {};
+  for (const toolUse of toolUses) {
+    const name = toolUse.name || "unknown";
+    counts[name] = (counts[name] || 0) + 1;
+  }
+
+  const executeCodeCount = Object.entries(counts)
+    .filter(([name]) => name.includes("execute_code"))
+    .reduce((sum, [, count]) => sum + count, 0);
+
+  return {
+    tool_use_count: toolUses.length,
+    read_count: counts.Read || 0,
+    write_count: (counts.Write || 0) + (counts.Edit || 0) + (counts.MultiEdit || 0),
+    execute_code_count: executeCodeCount,
+    export_shape_count: Object.entries(counts)
+      .filter(([name]) => name.includes("export_shape"))
+      .reduce((sum, [, count]) => sum + count, 0),
+  };
 }
 
 function hasTranscriptWfDescRemoval(transcriptPath) {
@@ -4794,12 +4875,40 @@ function recoverOpenDispatches(state) {
             continue;
           }
 
-          recoveredEntries.push({
-            batch_id: meta.batch_id,
-            item_id: meta.item_id,
-            role: meta.role,
-            resolution: "claimed_without_stop_event_pending",
-          });
+            recoveredEntries.push({
+              batch_id: meta.batch_id,
+              item_id: meta.item_id,
+              role: meta.role,
+              resolution: "claimed_without_stop_event_pending",
+            });
+          const staleClaimedWithoutTranscript =
+            !transcriptExists &&
+            Date.now() - claimedAt > ACTIVE_AGENT_TRANSCRIPT_IDLE_MS;
+
+          if (staleClaimedWithoutTranscript) {
+            const reason = "stale claimed dispatch without stop event or transcript";
+            entry.status = "rejected";
+            entry.stop_reason = reason;
+            entry.finished_at = nowIso();
+            if (
+              !hasIssuedTicket(roleState) &&
+              roleState.status !== "done" &&
+              roleState.status !== "skipped"
+            ) {
+              roleState.status = "blocked";
+              roleState.last_error = reason;
+              roleState.last_updated_at = nowIso();
+              if (!Array.isArray(roleState.retry_scope) || roleState.retry_scope.length === 0) {
+                roleState.retry_scope = [`retry stale dispatch recovery: ${reason}`];
+              }
+            }
+            recoveredEntries.push({
+              batch_id: meta.batch_id,
+              item_id: meta.item_id,
+              role: meta.role,
+              resolution: "rejected_stale_claimed_without_transcript",
+            });
+          }
         }
       }
 
@@ -4964,6 +5073,7 @@ async function handleSubagentStop() {
       status: result.status,
       failures: result.failures,
       retry_limit: result.retryLimit,
+      transcript_usage: summarizeTranscriptToolUsage(payload.agent_transcript_path || null),
     },
     payload: {
       agent_id: payload.agent_id || null,
@@ -5092,6 +5202,7 @@ function handleEnsureStateItem(args) {
 
 function handleRefreshLiveStatus() {
   const state = loadState();
+  recoverOpenDispatches(state);
   writeLiveStatus(state);
   printJson({
     ok: true,
@@ -5158,6 +5269,7 @@ function handleHoldResolve(args) {
 
 function handleNextAction() {
   const state = loadState();
+  recoverOpenDispatches(state);
   autoHoldStuckReviewGates(state);
   saveState(state);
   printJson({

@@ -54,6 +54,8 @@ hooks:
    - 자가 점검
 - 위 1~6을 끝내기 전에는 완료처럼 말하지 않는다.
 - claim / evidence 없이 종료하지 않는다.
+- Penpot은 꼭 필요한 보드만 수정한다. 한 dispatch 안에서 `mcp__penpot__execute_code`는 최대 5회, `export_shape`는 최대 2회까지만 사용한다.
+- 프롬프트에 적힌 Read 파일을 전부 읽지 않는다. 현재 작업에 실제 필요한 파일만 고르고, 같은 파일 반복 Read 는 금지한다.
 
 ## wf_* / desc_* 작성 세부 규칙 (wf 그리기 단계 보강)
 

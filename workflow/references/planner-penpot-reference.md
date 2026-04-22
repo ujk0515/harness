@@ -68,6 +68,8 @@ const nextY = descText.y + measuredHeight + 16;
 
 ## 실행 분할
 - 한 번의 `execute_code`에 shape 10개 이내.
+- 한 dispatch 전체 기준 `execute_code`는 최대 5회, `export_shape`는 최대 2회까지만 사용한다.
+- 보드 전체를 다시 그리려 하지 말고, 필요한 부분만 작은 수정으로 끝낸다.
 - 권장 순서:
   1. `wf_*` Board 생성
   2. `wf_*` 상단 구조
