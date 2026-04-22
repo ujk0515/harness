@@ -72,6 +72,7 @@
 - `Flex Layout`은 쓰지 않는다. 절대 좌표로 배치한다.
 - 텍스트는 항상 `resize + auto-height`.
 - 한 dispatch 전체 기준 `execute_code`는 최대 5회, `export_shape`는 최대 2회까지만 사용한다.
+- 여러 보드를 크게 수정해야 하면 한 dispatch에 몰지 말고 board/screen 단위로 쪼개는 것을 우선한다.
 - 보드 전체 재작성 대신 변경된 블록만 작게 수정한다.
 
 ```javascript

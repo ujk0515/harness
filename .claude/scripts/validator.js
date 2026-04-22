@@ -19,8 +19,10 @@ const STATE_SCHEMA_VERSION = "1.4.0-draft";
 const DISPATCH_SCHEMA_VERSION = "1.0.0-draft";
 const DISPATCH_TERMINAL_STATUSES = new Set(["completed", "blocked", "rejected"]);
 const STALE_PENDING_WITHOUT_AGENT_MS = 30 * 1000;
-const STALE_CLAIMED_WITHOUT_STOP_MS = 3 * 1000;
+const STALE_CLAIMED_WITHOUT_STOP_MS = 30 * 1000;
 const ACTIVE_AGENT_TRANSCRIPT_IDLE_MS = 15 * 60 * 1000;
+const STATE_PERSIST_DEFERRED = Symbol("statePersistDeferred");
+const STATE_PERSIST_DIRTY = Symbol("statePersistDirty");
 
 function readStdin() {
   return new Promise((resolve, reject) => {
@@ -323,6 +325,10 @@ function loadState() {
 
 function saveState(state) {
   state.updated_at = nowIso();
+  if (state && state[STATE_PERSIST_DEFERRED]) {
+    state[STATE_PERSIST_DIRTY] = true;
+    return;
+  }
   const statePath = resolvePath("workspace/planning/request-state.json");
   writeJsonFile(statePath, state);
   writeLiveStatus(state);
@@ -377,7 +383,7 @@ function getDispatchTranscriptIdleMs(dispatch) {
     return Infinity;
   }
 
-  const transcriptPath = inferAgentTranscriptPath(dispatch.session_id, dispatch.agent_id);
+  const transcriptPath = resolveAgentTranscriptPath(dispatch.session_id, dispatch.agent_id).path;
   if (!transcriptPath || !fs.existsSync(transcriptPath)) {
     return Infinity;
   }
@@ -1113,6 +1119,68 @@ function withDispatchLock(callback, state = null) {
     saveDispatchState(dispatchState, state);
     return result;
   } finally {
+    fs.rmSync(lockPath, { recursive: true, force: true });
+  }
+}
+
+function withStateDispatchTransaction(state, callback, options = {}) {
+  const commitOrder = options.commitOrder === "state_then_dispatch" ? "state_then_dispatch" : "dispatch_then_state";
+  const lockPath = resolvePath("workspace/planning/.dispatch.lock");
+  const waitUntil = Date.now() + 2000;
+
+  while (true) {
+    try {
+      fs.mkdirSync(lockPath);
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST") {
+        throw error;
+      }
+
+      if (Date.now() > waitUntil) {
+        throw new Error("Dispatch lock is busy");
+      }
+      sleepMs(50);
+    }
+  }
+
+  const previousDeferred = !!(state && state[STATE_PERSIST_DEFERRED]);
+  const previousDirty = !!(state && state[STATE_PERSIST_DIRTY]);
+  if (state && !previousDeferred) {
+    state[STATE_PERSIST_DEFERRED] = true;
+    state[STATE_PERSIST_DIRTY] = false;
+  }
+
+  try {
+    const dispatchState = loadDispatchState(state);
+    const result = callback(dispatchState);
+
+    if (state && !previousDeferred) {
+      state[STATE_PERSIST_DEFERRED] = false;
+      if (commitOrder === "state_then_dispatch") {
+        saveState(state);
+        saveDispatchState(dispatchState, state);
+      } else {
+        saveDispatchState(dispatchState, state);
+        saveState(state);
+      }
+      state[STATE_PERSIST_DIRTY] = false;
+    } else {
+      saveDispatchState(dispatchState, state);
+    }
+
+    return result;
+  } catch (error) {
+    if (state && !previousDeferred) {
+      state[STATE_PERSIST_DEFERRED] = previousDeferred;
+      state[STATE_PERSIST_DIRTY] = previousDirty;
+    }
+    throw error;
+  } finally {
+    if (state && !previousDeferred) {
+      state[STATE_PERSIST_DEFERRED] = previousDeferred;
+      state[STATE_PERSIST_DIRTY] = previousDirty;
+    }
     fs.rmSync(lockPath, { recursive: true, force: true });
   }
 }
@@ -2489,20 +2557,170 @@ function buildClaudeProjectSlug() {
   return resolveProjectRoot().replace(/\//g, "-");
 }
 
-function inferAgentTranscriptPath(sessionId, agentId) {
-  if (!sessionId || !agentId) {
-    return null;
+function getClaudeProjectsRoot() {
+  return path.join(os.homedir(), ".claude", "projects");
+}
+
+function safeReadDir(dirPath) {
+  try {
+    return fs.readdirSync(dirPath, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+function pushTranscriptCandidate(candidates, candidatePath, source) {
+  if (!candidatePath) {
+    return;
   }
 
-  return path.join(
-    os.homedir(),
-    ".claude",
-    "projects",
-    buildClaudeProjectSlug(),
-    String(sessionId),
-    "subagents",
-    `agent-${agentId}.jsonl`
-  );
+  const normalized = normalizeComparablePath(candidatePath);
+  if (!normalized) {
+    return;
+  }
+
+  if (candidates.some((entry) => entry.path === normalized)) {
+    return;
+  }
+
+  candidates.push({ path: normalized, source });
+}
+
+function inferAgentTranscriptCandidates(sessionId, agentId) {
+  if (!agentId) {
+    return [];
+  }
+
+  const candidates = [];
+  const projectsRoot = getClaudeProjectsRoot();
+  const currentProjectSlug = buildClaudeProjectSlug();
+  const currentProjectRoot = path.join(projectsRoot, currentProjectSlug);
+  const transcriptName = `agent-${agentId}.jsonl`;
+
+  if (sessionId) {
+    pushTranscriptCandidate(
+      candidates,
+      path.join(currentProjectRoot, String(sessionId), "subagents", transcriptName),
+      "exact_project_session"
+    );
+
+    for (const projectEntry of safeReadDir(projectsRoot)) {
+      if (!projectEntry.isDirectory() || projectEntry.name === currentProjectSlug) {
+        continue;
+      }
+      pushTranscriptCandidate(
+        candidates,
+        path.join(projectsRoot, projectEntry.name, String(sessionId), "subagents", transcriptName),
+        "fallback_session_scan"
+      );
+    }
+  }
+
+  for (const sessionEntry of safeReadDir(currentProjectRoot)) {
+    if (!sessionEntry.isDirectory() || sessionEntry.name === "memory") {
+      continue;
+    }
+    pushTranscriptCandidate(
+      candidates,
+      path.join(currentProjectRoot, sessionEntry.name, "subagents", transcriptName),
+      "fallback_current_project_agent_scan"
+    );
+  }
+
+  for (const projectEntry of safeReadDir(projectsRoot)) {
+    if (!projectEntry.isDirectory() || projectEntry.name === currentProjectSlug) {
+      continue;
+    }
+    for (const sessionEntry of safeReadDir(path.join(projectsRoot, projectEntry.name))) {
+      if (!sessionEntry.isDirectory() || sessionEntry.name === "memory") {
+        continue;
+      }
+      pushTranscriptCandidate(
+        candidates,
+        path.join(projectsRoot, projectEntry.name, sessionEntry.name, "subagents", transcriptName),
+        "fallback_global_agent_scan"
+      );
+    }
+  }
+
+  return candidates;
+}
+
+function resolveAgentTranscriptPath(sessionId, agentId) {
+  const candidates = inferAgentTranscriptCandidates(sessionId, agentId);
+  const existing = candidates
+    .filter((candidate) => fs.existsSync(candidate.path))
+    .map((candidate) => {
+      let mtimeMs = 0;
+      try {
+        mtimeMs = fs.statSync(candidate.path).mtimeMs;
+      } catch {
+        mtimeMs = 0;
+      }
+      return {
+        ...candidate,
+        mtimeMs,
+      };
+    });
+
+  const sourcePriority = {
+    exact_project_session: 0,
+    fallback_session_scan: 1,
+    fallback_current_project_agent_scan: 2,
+    fallback_global_agent_scan: 3,
+  };
+
+  const chosen =
+    existing.length > 0
+      ? existing.sort(
+          (a, b) =>
+            (sourcePriority[a.source] ?? 99) - (sourcePriority[b.source] ?? 99) ||
+            b.mtimeMs - a.mtimeMs ||
+            a.source.localeCompare(b.source)
+        )[0]
+      : null;
+
+  return {
+    path: chosen ? chosen.path : null,
+    source: chosen ? chosen.source : "missing",
+    attempted_paths: candidates.map((candidate) => candidate.path),
+    attempted_sources: candidates.map((candidate) => candidate.source),
+    existing_paths: existing.map((candidate) => candidate.path),
+  };
+}
+
+function inferAgentTranscriptPath(sessionId, agentId) {
+  return resolveAgentTranscriptPath(sessionId, agentId).path;
+}
+
+function appendTranscriptResolutionLog(meta, context) {
+  appendJsonLine(resolvePath("workspace/reports/hook-events.jsonl"), {
+    logged_at: nowIso(),
+    hook_event_name: "TranscriptPathResolution",
+    task_meta: meta || null,
+    extra: {
+      stage: context && context.stage ? context.stage : "unknown",
+      outcome: context && context.outcome ? context.outcome : "unknown",
+      resolution_source: context && context.resolution_source ? context.resolution_source : "missing",
+      dispatch_age_ms:
+        context && typeof context.dispatch_age_ms === "number" ? context.dispatch_age_ms : null,
+      attempted_count:
+        context && Array.isArray(context.attempted_sources) ? context.attempted_sources.length : 0,
+      attempted_sources:
+        context && Array.isArray(context.attempted_sources)
+          ? context.attempted_sources.slice(0, 20)
+          : [],
+      attempted_paths:
+        context && Array.isArray(context.attempted_paths) ? context.attempted_paths.slice(0, 20) : [],
+      existing_paths:
+        context && Array.isArray(context.existing_paths) ? context.existing_paths.slice(0, 20) : [],
+    },
+    payload: {
+      session_id: context && context.session_id ? context.session_id : null,
+      agent_id: context && context.agent_id ? context.agent_id : null,
+      resolved_path: context && context.resolved_path ? context.resolved_path : null,
+    },
+  });
 }
 
 function normalizeComparablePath(filePath) {
@@ -2513,14 +2731,13 @@ function normalizeComparablePath(filePath) {
   return path.resolve(path.isAbsolute(filePath) ? filePath : resolvePath(filePath));
 }
 
-function readTranscriptToolUses(transcriptPath) {
+function readTranscriptEntries(transcriptPath) {
   const fullPath = normalizeComparablePath(transcriptPath);
   if (!fullPath || !fs.existsSync(fullPath)) {
     return [];
   }
 
   const results = [];
-  let index = 0;
 
   for (const line of fs.readFileSync(fullPath, "utf8").split("\n")) {
     const trimmed = line.trim();
@@ -2534,6 +2751,18 @@ function readTranscriptToolUses(transcriptPath) {
     } catch {
       continue;
     }
+
+    results.push(entry);
+  }
+
+  return results;
+}
+
+function readTranscriptToolUses(transcriptPath) {
+  const results = [];
+  let index = 0;
+
+  for (const entry of readTranscriptEntries(transcriptPath)) {
 
     if (entry.type !== "assistant" || !entry.message || !Array.isArray(entry.message.content)) {
       continue;
@@ -2643,6 +2872,7 @@ function getTranscriptExecuteCodeBlocks(transcriptPath) {
 }
 
 function summarizeTranscriptToolUsage(transcriptPath) {
+  const entries = readTranscriptEntries(transcriptPath);
   const toolUses = readTranscriptToolUses(transcriptPath);
   const counts = {};
   for (const toolUse of toolUses) {
@@ -2650,18 +2880,50 @@ function summarizeTranscriptToolUsage(transcriptPath) {
     counts[name] = (counts[name] || 0) + 1;
   }
 
+  const assistantEntries = entries.filter(
+    (entry) => entry && entry.type === "assistant" && entry.message
+  );
+  const lastAssistantEntry =
+    assistantEntries.length > 0 ? assistantEntries[assistantEntries.length - 1] : null;
+  const lastAssistantUsage =
+    lastAssistantEntry &&
+    lastAssistantEntry.message &&
+    lastAssistantEntry.message.usage &&
+    typeof lastAssistantEntry.message.usage === "object"
+      ? lastAssistantEntry.message.usage
+      : {};
+  const timestampValues = entries
+    .map((entry) => Date.parse(entry && entry.timestamp ? entry.timestamp : ""))
+    .filter((value) => !Number.isNaN(value));
+  const durationMs =
+    timestampValues.length >= 2
+      ? Math.max(0, timestampValues[timestampValues.length - 1] - timestampValues[0])
+      : 0;
+
   const executeCodeCount = Object.entries(counts)
     .filter(([name]) => name.includes("execute_code"))
     .reduce((sum, [, count]) => sum + count, 0);
 
   return {
     tool_use_count: toolUses.length,
+    assistant_turns: assistantEntries.length,
     read_count: counts.Read || 0,
     write_count: (counts.Write || 0) + (counts.Edit || 0) + (counts.MultiEdit || 0),
     execute_code_count: executeCodeCount,
     export_shape_count: Object.entries(counts)
       .filter(([name]) => name.includes("export_shape"))
       .reduce((sum, [, count]) => sum + count, 0),
+    last_cache_read_tokens:
+      typeof lastAssistantUsage.cache_read_input_tokens === "number"
+        ? lastAssistantUsage.cache_read_input_tokens
+        : 0,
+    last_stop_reason:
+      lastAssistantEntry &&
+      lastAssistantEntry.message &&
+      typeof lastAssistantEntry.message.stop_reason === "string"
+        ? lastAssistantEntry.message.stop_reason
+        : null,
+    duration_ms: durationMs,
   };
 }
 
@@ -4423,23 +4685,17 @@ async function handlePreToolUseAgent() {
   let dispatchEntry = null;
 
   try {
-    withDispatchLock((dispatchState) => {
+    withStateDispatchTransaction(state, (dispatchState) => {
       if (hasOpenDispatch(dispatchState)) {
         blockedReason = "Another Agent dispatch is already in flight. Wait for it to finish before spawning the next Agent.";
-        return;
-      }
-
-      if (
+      } else if (
         !plannerReopen &&
         !designerReviewSync &&
         (context.roleState.done_ticket.status === "issued" ||
           context.roleState.skip_ticket.status === "issued")
       ) {
         blockedReason = `${meta.role} already has a done/skip ticket for ${meta.batch_id}/${meta.item_id}.`;
-        return;
-      }
-
-      if (context.roleState.attempt >= retryLimit) {
+      } else if (context.roleState.attempt >= retryLimit) {
         upsertHold(
           state,
           "retry_limit_exhausted",
@@ -4452,39 +4708,34 @@ async function handlePreToolUseAgent() {
           "validator"
         );
         blockedReason = `Retry limit reached for ${meta.batch_id}/${meta.item_id}/${meta.role}. Escalate to user.`;
-        return;
-      }
-
-      if (predecessorFailures.length > 0) {
+      } else if (predecessorFailures.length > 0) {
         blockedReason = `Blocked ${meta.role} task for ${meta.batch_id}/${meta.item_id}: ${summarizeFailures(predecessorFailures)}`;
-        return;
+      } else {
+        dispatchEntry = buildDispatchEntry(payload, parsed);
+        dispatchState.entries.push(dispatchEntry);
       }
 
-      dispatchEntry = buildDispatchEntry(payload, parsed);
-      dispatchState.entries.push(dispatchEntry);
-    }, state);
+      context.roleState.claim_path = path.relative(resolveProjectRoot(), getClaimPath(state, meta));
+      context.roleState.status = dispatchEntry ? "claimed" : "blocked";
+      context.roleState.last_error = blockedReason;
+      context.roleState.last_updated_at = nowIso();
+
+      upsertTaskRegistry(
+        state,
+        {
+          task_id: parsed.tool_use_id || null,
+          task_subject: parsed.description,
+          task_description: parsed.description,
+          teammate_name: null,
+          team_name: null,
+        },
+        meta,
+        dispatchEntry ? "created" : "completion_blocked"
+      );
+    }, { commitOrder: "dispatch_then_state" });
   } catch (error) {
     blockedReason = `PreToolUse gate error: ${error.message}`;
   }
-
-  context.roleState.claim_path = path.relative(resolveProjectRoot(), getClaimPath(state, meta));
-  context.roleState.status = dispatchEntry ? "claimed" : "blocked";
-  context.roleState.last_error = blockedReason;
-  context.roleState.last_updated_at = nowIso();
-
-  upsertTaskRegistry(
-    state,
-    {
-      task_id: parsed.tool_use_id || null,
-      task_subject: parsed.description,
-      task_description: parsed.description,
-      teammate_name: null,
-      team_name: null,
-    },
-    meta,
-    dispatchEntry ? "created" : "completion_blocked"
-  );
-  saveState(state);
 
   if (blockedReason && state.gate_mode === "enforce") {
     stderrBlock(blockedReason);
@@ -4775,7 +5026,7 @@ function finalizeDispatchEntry(state, dispatchEntry, payload) {
 function recoverOpenDispatches(state) {
   const recoveredEntries = [];
 
-  withDispatchLock((dispatchState) => {
+  withStateDispatchTransaction(state, (dispatchState) => {
     for (const entry of dispatchState.entries || []) {
       if (!entry || DISPATCH_TERMINAL_STATUSES.has(entry.status)) {
         continue;
@@ -4853,8 +5104,26 @@ function recoverOpenDispatches(state) {
           Date.now() - claimedAt > STALE_CLAIMED_WITHOUT_STOP_MS;
 
         if (staleClaimedWithoutStop) {
-          const inferredTranscriptPath = inferAgentTranscriptPath(entry.session_id, entry.agent_id);
-          const transcriptExists = inferredTranscriptPath && fs.existsSync(inferredTranscriptPath);
+          const transcriptResolution = resolveAgentTranscriptPath(entry.session_id, entry.agent_id);
+          const inferredTranscriptPath = transcriptResolution.path;
+          const transcriptExists = !!inferredTranscriptPath;
+          const dispatchAgeMs = Math.max(0, Date.now() - claimedAt);
+
+          if (transcriptExists && transcriptResolution.source !== "exact_project_session") {
+            appendTranscriptResolutionLog(meta, {
+              stage: "recover-open-dispatches",
+              outcome: "fallback_hit",
+              resolution_source: transcriptResolution.source,
+              attempted_sources: transcriptResolution.attempted_sources,
+              attempted_paths: transcriptResolution.attempted_paths,
+              existing_paths: transcriptResolution.existing_paths,
+              session_id: entry.session_id || null,
+              agent_id: entry.agent_id || null,
+              resolved_path: inferredTranscriptPath,
+              dispatch_age_ms: dispatchAgeMs,
+            });
+          }
+
           if (transcriptExists) {
             const syntheticPayload = {
               agent_id: entry.agent_id,
@@ -4875,12 +5144,6 @@ function recoverOpenDispatches(state) {
             continue;
           }
 
-            recoveredEntries.push({
-              batch_id: meta.batch_id,
-              item_id: meta.item_id,
-              role: meta.role,
-              resolution: "claimed_without_stop_event_pending",
-            });
           const staleClaimedWithoutTranscript =
             !transcriptExists &&
             Date.now() - claimedAt > ACTIVE_AGENT_TRANSCRIPT_IDLE_MS;
@@ -4902,11 +5165,30 @@ function recoverOpenDispatches(state) {
                 roleState.retry_scope = [`retry stale dispatch recovery: ${reason}`];
               }
             }
+            appendTranscriptResolutionLog(meta, {
+              stage: "recover-open-dispatches",
+              outcome: "missing",
+              resolution_source: transcriptResolution.source,
+              attempted_sources: transcriptResolution.attempted_sources,
+              attempted_paths: transcriptResolution.attempted_paths,
+              existing_paths: transcriptResolution.existing_paths,
+              session_id: entry.session_id || null,
+              agent_id: entry.agent_id || null,
+              resolved_path: null,
+              dispatch_age_ms: dispatchAgeMs,
+            });
             recoveredEntries.push({
               batch_id: meta.batch_id,
               item_id: meta.item_id,
               role: meta.role,
               resolution: "rejected_stale_claimed_without_transcript",
+            });
+          } else {
+            recoveredEntries.push({
+              batch_id: meta.batch_id,
+              item_id: meta.item_id,
+              role: meta.role,
+              resolution: "claimed_without_stop_event_pending",
             });
           }
         }
@@ -4934,9 +5216,8 @@ function recoverOpenDispatches(state) {
         });
       }
     }
-  }, state);
+  }, { commitOrder: "state_then_dispatch" });
 
-  saveState(state);
   return recoveredEntries;
 }
 
@@ -4955,7 +5236,7 @@ async function handleSubagentStart() {
   let matchedDispatch = null;
 
   try {
-    withDispatchLock((dispatchState) => {
+    withStateDispatchTransaction(state, (dispatchState) => {
       if (payload.tool_use_id) {
         matchedDispatch = dispatchState.entries.find(
           (entry) =>
@@ -4976,7 +5257,30 @@ async function handleSubagentStart() {
       matchedDispatch.agent_id = payload.agent_id || null;
       matchedDispatch.agent_type = payload.agent_type || null;
       matchedDispatch.claimed_at = nowIso();
-    }, state);
+      const meta = {
+        batch_id: matchedDispatch.batch_id,
+        item_id: matchedDispatch.item_id,
+        role: matchedDispatch.role,
+        summary: matchedDispatch.summary,
+      };
+      const context = getStateContext(state, meta);
+      context.roleState.status = "in_progress";
+      context.roleState.last_error = null;
+      context.roleState.last_updated_at = nowIso();
+
+      upsertTaskRegistry(
+        state,
+        {
+          task_id: matchedDispatch.tool_use_id,
+          task_subject: matchedDispatch.description,
+          task_description: matchedDispatch.description,
+          teammate_name: payload.agent_id || null,
+          team_name: null,
+        },
+        meta,
+        "created"
+      );
+    }, { commitOrder: "dispatch_then_state" });
   } catch (error) {
     logHookEvent(payload, {
       stage: "subagent-start-error",
@@ -4984,35 +5288,6 @@ async function handleSubagentStart() {
     });
     return;
   }
-
-  if (!matchedDispatch) {
-    return;
-  }
-
-  const meta = {
-    batch_id: matchedDispatch.batch_id,
-    item_id: matchedDispatch.item_id,
-    role: matchedDispatch.role,
-    summary: matchedDispatch.summary,
-  };
-  const context = getStateContext(state, meta);
-  context.roleState.status = "in_progress";
-  context.roleState.last_error = null;
-  context.roleState.last_updated_at = nowIso();
-
-  upsertTaskRegistry(
-    state,
-    {
-      task_id: matchedDispatch.tool_use_id,
-      task_subject: matchedDispatch.description,
-      task_description: matchedDispatch.description,
-      teammate_name: payload.agent_id || null,
-      team_name: null,
-    },
-    meta,
-    "created"
-  );
-  saveState(state);
 }
 
 async function handleSubagentStop() {
@@ -5028,9 +5303,11 @@ async function handleSubagentStop() {
 
   const state = loadState();
   let dispatchEntry = null;
+  let meta = null;
+  let result = null;
 
   try {
-    withDispatchLock((dispatchState) => {
+    withStateDispatchTransaction(state, (dispatchState) => {
       dispatchEntry = findDispatchByAgentId(dispatchState, payload.agent_id || null);
       if (!dispatchEntry) {
         return;
@@ -5038,7 +5315,21 @@ async function handleSubagentStop() {
 
       dispatchEntry.finished_at = nowIso();
       dispatchEntry.last_assistant_message = payload.last_assistant_message || null;
-    }, state);
+      meta = {
+        batch_id: dispatchEntry.batch_id,
+        item_id: dispatchEntry.item_id,
+        role: dispatchEntry.role,
+        summary: dispatchEntry.summary,
+      };
+      result = finalizeDispatchEntry(state, dispatchEntry, payload);
+
+      const latest = findDispatchByAgentId(dispatchState, payload.agent_id || null);
+      if (latest) {
+        latest.status = result.status;
+        latest.stop_reason = result.ok ? null : summarizeFailures(result.failures);
+        latest.finished_at = result.validatedAt;
+      }
+    }, { commitOrder: "state_then_dispatch" });
   } catch (error) {
     if (state.gate_mode === "enforce") {
       stderrBlock(`Dispatch lock error during SubagentStop: ${error.message}`);
@@ -5054,14 +5345,6 @@ async function handleSubagentStop() {
     }
     return;
   }
-
-  const meta = {
-    batch_id: dispatchEntry.batch_id,
-    item_id: dispatchEntry.item_id,
-    role: dispatchEntry.role,
-    summary: dispatchEntry.summary,
-  };
-  const result = finalizeDispatchEntry(state, dispatchEntry, payload);
 
   appendJsonLine(resolvePath("workspace/reports/hook-events.jsonl"), {
     logged_at: nowIso(),
@@ -5080,15 +5363,6 @@ async function handleSubagentStop() {
       agent_transcript_path: payload.agent_transcript_path || null,
     },
   });
-
-  withDispatchLock((dispatchState) => {
-    const latest = findDispatchByAgentId(dispatchState, payload.agent_id || null);
-    if (latest) {
-      latest.status = result.status;
-      latest.stop_reason = result.ok ? null : summarizeFailures(result.failures);
-      latest.finished_at = result.validatedAt;
-    }
-  }, state);
 
   if (!result.ok && state.gate_mode === "enforce") {
     const prefix =

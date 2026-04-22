@@ -35,6 +35,7 @@ hooks:
 - 이미 `pass`한 항목은 처음부터 다시 하지 않는다.
 - **토큰 절약 규칙 (필수):** 모든 입력 파일은 **1회만 Read**. 특히 `A-planning-doc.md` 는 50KB 이상일 수 있으므로 **첫 Read 1회** 로 끝내고, 이후 필요한 섹션만 `offset`/`limit` 으로 부분 읽기. 같은 파일 반복 Read 는 claim/evidence 쓰기 단계 전에 토큰 고갈을 유발하므로 금지.
 - Penpot은 꼭 필요한 보드만 수정한다. 한 dispatch 안에서 `mcp__penpot__execute_code`는 최대 5회, `export_shape`는 최대 2회까지만 사용한다.
+- 여러 보드를 크게 손대야 하면 한 dispatch에 몰지 말고 board/screen 단위로 쪼개는 쪽을 우선 검토한다.
 - 프롬프트에 적힌 Read 파일을 전부 읽지 않는다. 현재 작업에 실제 필요한 파일만 고르고, 같은 파일 반복 Read 는 금지한다.
 
 ## 핵심 원칙
