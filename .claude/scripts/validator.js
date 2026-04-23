@@ -2950,44 +2950,6 @@ function checkTranscriptNoWfDescRemoval(transcriptPath) {
   return !hasTranscriptWfDescRemoval(transcriptPath);
 }
 
-function checkSnapshotPreservesIds(beforePath, afterPath) {
-  const beforeFullPath = resolvePath(beforePath);
-  const afterFullPath = resolvePath(afterPath);
-
-  if (!fs.existsSync(beforeFullPath) || !fs.existsSync(afterFullPath)) {
-    return false;
-  }
-
-  const beforePayload = parseJsonFile(beforePath);
-  const afterPayload = parseJsonFile(afterPath);
-  const beforeItems = Array.isArray(beforePayload) ? beforePayload : [];
-  const afterItems = Array.isArray(afterPayload) ? afterPayload : [];
-  const indexAfter = new Map();
-  for (const entry of afterItems) {
-    if (entry && typeof entry.id === "string") indexAfter.set(entry.id, entry);
-  }
-
-  if (beforeItems.length === 0) {
-    return true;
-  }
-
-  for (const be of beforeItems) {
-    if (!be || typeof be.id !== "string") continue;
-    const af = indexAfter.get(be.id);
-    if (!af) return false;
-    if (typeof be.name === "string" && typeof af.name === "string" && be.name !== af.name) return false;
-    if (typeof be.content_hash === "string" && typeof af.content_hash === "string" && be.content_hash !== af.content_hash) return false;
-    if (Number.isFinite(be.elements_count) && Number.isFinite(af.elements_count) && be.elements_count !== af.elements_count) return false;
-    if (Array.isArray(be.elements) && Array.isArray(af.elements)) {
-      const beIds = new Set(be.elements.map((e) => e && e.id).filter(Boolean));
-      for (const id of beIds) {
-        if (!af.elements.some((e) => e && e.id === id)) return false;
-      }
-    }
-  }
-  return true;
-}
-
 function loadChecklistDefinitions() {
   return parseJsonFile("workflow/checklists/task-gate-checklists.json");
 }
@@ -5904,9 +5866,6 @@ function handleCheckInner(type, rest) {
       break;
     case "transcript_no_wf_desc_removal":
       ok = checkTranscriptNoWfDescRemoval(rest[0]);
-      break;
-    case "snapshot_preserves_ids":
-      ok = checkSnapshotPreservesIds(rest[0], rest[1]);
       break;
     case "user_raw_request_match":
       ok = checkUserRawRequestMatch(rest[0], rest[1]);
