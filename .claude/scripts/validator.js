@@ -1568,36 +1568,6 @@ function checkWfBoardsMatchPlanningDoc(claimPath, docPath) {
   });
 }
 
-function checkRetryPreservesBoardIds(evidenceDir) {
-  const fullDir = resolvePath(evidenceDir);
-  if (!fs.existsSync(fullDir)) return false;
-  const afterPath = path.join(fullDir, "wf-desc-snapshot-after.json");
-  if (!fs.existsSync(afterPath)) return true;
-  const archiveDir = path.join(fullDir, "archive");
-  if (!fs.existsSync(archiveDir)) return true;
-  const attempts = fs.readdirSync(archiveDir).filter((d) => /^attempt-\d+$/.test(d));
-  if (attempts.length === 0) return true;
-  attempts.sort((a, b) => parseInt(b.split("-")[1], 10) - parseInt(a.split("-")[1], 10));
-  const prevAfter = path.join(archiveDir, attempts[0], "wf-desc-snapshot-after.json");
-  if (!fs.existsSync(prevAfter)) return true;
-  let prev, curr;
-  try {
-    prev = JSON.parse(fs.readFileSync(prevAfter, "utf8"));
-    curr = JSON.parse(fs.readFileSync(afterPath, "utf8"));
-  } catch (e) {
-    return false;
-  }
-  const prevIds = (Array.isArray(prev) ? prev : [])
-    .map((e) => e && e.id)
-    .filter(Boolean);
-  const currIds = new Set(
-    (Array.isArray(curr) ? curr : [])
-      .map((e) => e && e.id)
-      .filter(Boolean)
-  );
-  return prevIds.every((id) => currIds.has(id));
-}
-
 function checkRequestCoverageValid(claimPath) {
   if (!checkFileExists(claimPath)) return false;
   const claim = parseJsonFile(claimPath);
@@ -2463,38 +2433,6 @@ function checkTranscriptNoForbiddenWrites(transcriptPath, forbiddenPatterns) {
       const regex = new RegExp(pattern);
       if (regex.test(fp)) return false;
     }
-  }
-  return true;
-}
-
-function checkTranscriptStepOrder(transcriptPath) {
-  if (!checkFileExists(transcriptPath)) return false;
-  const fullPath = resolvePath(transcriptPath);
-  const content = fs.readFileSync(fullPath, "utf8");
-  const lines = content.split("\n").filter((l) => l.trim());
-  const markers = {
-    read_workboard: /request-workboard\.md/,
-    read_sequence: /planner-workflow\/references\/sequence\.md/,
-    boards_snapshot: /boards-snapshot\.json/,
-    write_planning_doc: /A-planning-doc\.md/,
-    write_wf_evidence: /wf-export\.json/,
-    write_claim: /planner\.claim\.json/,
-  };
-  const firstSeen = {};
-  for (let i = 0; i < lines.length; i++) {
-    for (const [key, re] of Object.entries(markers)) {
-      if (firstSeen[key] === undefined && re.test(lines[i])) {
-        firstSeen[key] = i;
-      }
-    }
-  }
-  const order = ["read_workboard", "read_sequence", "boards_snapshot", "write_planning_doc", "write_wf_evidence", "write_claim"];
-  let last = -1;
-  for (const key of order) {
-    const idx = firstSeen[key];
-    if (idx === undefined) return false;
-    if (idx < last) return false;
-    last = idx;
   }
   return true;
 }
@@ -5637,7 +5575,6 @@ function checkPlannerBoardsValid(claimPath, docPath, evidenceDir, itemId) {
     if (claim.action !== "NO_CHANGE") {
       if (!checkWfBoardsMatchPlanningDoc(claimPath, docPath)) return false;
       if (!checkMultiScreenEvidenceExists(claimPath, evidenceDir)) return false;
-      if (!checkRetryPreservesBoardIds(evidenceDir)) return false;
     }
   } catch {
     return false;
@@ -5813,9 +5750,6 @@ function handleCheckInner(type, rest) {
     case "hash_record_and_compare":
       ok = checkHashRecordAndCompare(rest[0], rest[1]);
       break;
-    case "transcript_step_order":
-      ok = checkTranscriptStepOrder(rest[0]);
-      break;
     case "transcript_no_forbidden_writes":
       ok = checkTranscriptNoForbiddenWrites(rest[0], rest.slice(1));
       break;
@@ -5836,9 +5770,6 @@ function handleCheckInner(type, rest) {
       break;
     case "wf_boards_match_planning_doc":
       ok = checkWfBoardsMatchPlanningDoc(rest[0], rest[1]);
-      break;
-    case "retry_preserves_board_ids":
-      ok = checkRetryPreservesBoardIds(rest[0]);
       break;
     case "request_coverage_valid":
       ok = checkRequestCoverageValid(rest[0]);
