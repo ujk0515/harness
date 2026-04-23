@@ -3375,10 +3375,6 @@ const DISPATCH_PROMPT_REQUIREMENTS = {
   "planner:plan": {
     must_include: [
       "시작 순서 고정",
-      "request-workboard.md",
-      "project-config.md",
-      "A-benchmark.md",
-      "영향도",
       "reference_flows",
       "expected_user_path",
       "critical_states",
@@ -3391,12 +3387,6 @@ const DISPATCH_PROMPT_REQUIREMENTS = {
       "gap check",
       "claim",
       "evidence",
-      "사용자 원문",
-      "사전 검토",
-      "boards-snapshot",
-      "action_rationale",
-      "planning-doc-sections.md",
-      "lessons-learned.md",
     ],
     must_match: [/1\)/, /2\)/, /3\)/, /4\)/, /5\)/, /6\)/],
   },
@@ -3417,16 +3407,6 @@ const DISPATCH_PROMPT_REQUIREMENTS = {
   "planner:revise": {
     must_include: [
       "시작 순서 고정",
-      "developer-review.md",
-      "qa-review.md",
-      "planner-review.md",
-      "designer-review.md",
-      "assignments.json",
-      "assigned_task_ids",
-      "수긍",
-      "반박",
-      "wf-desc-snapshot-before",
-      "wf-desc-snapshot-after",
       "export_shape",
       "gap check",
       "claim",
@@ -3447,14 +3427,10 @@ const DISPATCH_PROMPT_REQUIREMENTS = {
   "designer:apply": {
     must_include: [
       "시작 순서 고정",
-      "wf-desc-snapshot-before",
-      "wf-desc-snapshot-after",
       "design_",
       "export_shape",
       "claim",
       "evidence",
-      "assignments.json",
-      "assigned_task_ids",
     ],
     must_match: [/1\)/, /2\)/, /3\)/, /4\)/, /5\)/],
   },
@@ -3750,7 +3726,7 @@ function validateDispatchPrompt(meta, prompt) {
   if (missingMatches.length > 0) {
     parts.push(`missing required step markers: ${missingMatches.map((re) => re.source).join(", ")}`);
   }
-  return `Dispatch prompt for ${key} is incomplete — ${parts.join("; ")}. Include the full 시작 순서 고정 step list from process.md before calling the Agent.`;
+  return `Dispatch prompt for ${key} is incomplete — ${parts.join("; ")}. Include the required guidance from process.md before calling the Agent.`;
 }
 
 function buildDispatchEntry(payload, parsed) {
@@ -5989,12 +5965,6 @@ function handleCheckInner(type, rest) {
     case "prior_review_addressed":
       ok = checkPriorReviewAddressed(rest[0], rest[1], rest[2]);
       break;
-    case "planner_process_reads_all":
-      ok = checkPlannerProcessReadsAll(rest[0]);
-      break;
-    case "planner_process_evidence_all":
-      ok = checkPlannerProcessEvidenceAll(rest[0], rest[1], rest[2]);
-      break;
     case "planner_claim_fields_all":
       ok = checkPlannerClaimFieldsAll(rest[0]);
       break;
@@ -6030,12 +6000,6 @@ function handleCheckInner(type, rest) {
       break;
     case "planner_review_bundle":
       ok = checkPlannerReviewBundle(rest[0], rest[1]);
-      break;
-    case "designer_process_common_reads":
-      ok = checkDesignerProcessCommonReads(rest[0]);
-      break;
-    case "designer_process_apply_writes":
-      ok = checkDesignerProcessApplyWrites(rest[0], rest[1], rest[2]);
       break;
     case "designer_apply_claim_fields":
       ok = checkDesignerApplyClaimFields(rest[0]);

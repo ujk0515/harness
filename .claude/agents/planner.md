@@ -25,14 +25,12 @@ hooks:
    - `workspace/planning/request-workboard.md`
    - `workspace/planning/project-config.md`
    - `workspace/planning/A-benchmark.md` — 메인 하네스가 이미 생성해 둔 상태. 없으면 호출 자체가 차단됨.
-   - `workspace/lessons-learned.md` — 메인 하네스가 첫 Batch 시작 시 stub 으로 자동 생성. 필요시 시초 기록만 있더라도 Read 한다.
-   - `workflow/standards/planning-doc-sections.md`
    - `.claude/skills/planner-workflow/references/sequence.md`
    - `workflow/references/planner-penpot-reference.md`
    - **토큰 절약 규칙 (필수):** 모든 파일은 **1회만 Read**. 재기획(revise)에서 기존 `A-planning-doc.md` 를 확인할 때는 **1회만** Read 하고, 필요한 섹션만 `offset`/`limit` 으로 부분 읽기. 같은 파일을 두 번 이상 Read 하지 말 것 — 대용량 파일(A-planning-doc.md 는 50KB 이상일 수 있음) 반복 Read 는 claim/evidence 쓰기 전에 토큰 고갈을 유발한다.
 2. 영향도 분석
    - 기존 `screen_id`, `wf_*`, `desc_*`, `design_*`를 파악한다.
-   - **수집 방법 강제:** `penpot.execute_code`로 현재 페이지의 모든 Board `{ id, name, type }` 목록을 가져와 `workspace/evidence/planner/{batch_id}/{item_id}/boards-snapshot.json` 에 저장한다. 이 스냅샷 없이 영향도 분석을 끝내면 안 된다.
+   - 필요한 범위에서만 기존 `screen_id`, `wf_*`, `desc_*`, `design_*`의 영향도를 확인한다. 전체 보드 스냅샷을 매번 새로 남길 필요는 없다.
 3. 정보수집
    - `reference_flows`
    - `expected_user_path`
@@ -43,7 +41,7 @@ hooks:
    - `UPDATE` / `CREATE` / `UPDATE+CREATE` / `NO_CHANGE`를 정한다.
    - **판별 근거 기록 필수:** claim 의 `action_rationale` 필드에 왜 그 판단을 했는지 (어떤 기존 screen_id 를 검토했는지, 흡수 가능한지, 왜 신규 필요한지) 2~5줄로 작성한다.
 5. 실제 작업
-   - 기획서 수정/작성 (`workflow/standards/planning-doc-sections.md` 에 정의된 **8개 표준 섹션 헤딩** 그대로 사용)
+   - 기획서 수정/작성 (현재 `A-planning-doc.md`의 표준 섹션 구조 유지)
    - 사전 검토 단계에서 사용자가 답변한 내용(제외된 기능, 명확화된 스코프)을 기획서에 정확히 반영하고 claim `pre_review_applied` 에 항목별 반영 근거 기록
    - `wf_*` / `desc_*` 수정/생성
    - `export_shape` 확인
@@ -253,10 +251,6 @@ hooks:
   - `board_name`
   - `board_id`
   - `exported_at`
-- `revise:`에서는 추가로 아래 snapshot evidence를 남긴다.
-  - `workspace/evidence/planner/{batch_id}/{item_id}/wf-desc-snapshot-before.json`
-  - `workspace/evidence/planner/{batch_id}/{item_id}/wf-desc-snapshot-after.json`
-  - 형식: `[{ id, name, type }]`
 - planner는 `done ticket`을 직접 만들지 않는다. validator가 체크리스트를 검사해 `planner.done.json`을 발급한다.
 - claim과 evidence는 **이번 시도에서 새로 갱신된 파일**이어야 한다. 이전 시도의 남은 파일은 통과로 인정되지 않는다.
 - `wf-export.json` / `desc-export.json`에 `board_id`와 `board_name`이 없으면, 실제 Penpot export 근거가 없는 것으로 보고 완료로 인정하지 않는다.

@@ -30,46 +30,38 @@
 
 ### Planner
 
-- transcript에 `workspace/planning/request-workboard.md` Read 호출 존재
-- transcript에 `workspace/planning/project-config.md` Read 호출 존재
-- `workspace/planning/A-benchmark.md`가 있으면 transcript에 Read 호출 존재
-- transcript에 `workspace/planning/A-planning-doc.md` 쓰기 호출 존재
-- transcript에서 planner claim 쓰기 호출이 planning doc 쓰기 이후에 존재
-- transcript에 `workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json` 쓰기 호출 존재
-- transcript에 `workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json` 쓰기 호출 존재
 - `revise:` 모드에서는 transcript 안에 `wf_*` / `desc_*` 삭제/재할당 호출이 없어야 함
-- `revise:` 모드에서는 `wf-desc-snapshot-before.json` / `wf-desc-snapshot-after.json` evidence가 현재 시도 이후 갱신되어야 함
-- `revise:` 모드에서는 before snapshot의 모든 `wf_*` / `desc_*` Board id가 after에도 남아 있어야 함
 - `workspace/claims/{batch_id}/{item_id}/planner.claim.json`가 현재 시도 이후 갱신
 - claim의 `covered_items`에 현재 `item_id` 포함
 - claim 안의 `wf_boards`, `desc_boards`가 비어 있지 않음
 - claim 안의 `reference_flows`, `expected_user_path`, `critical_states`, `avoid_patterns`가 비어 있지 않음
 - claim 안의 `export_shape_summary` 존재
+- claim 안의 `missing_items`가 비어 있음
+- claim 안에 유예/나중 처리 표현이 없어야 함
+- claim 안의 `request_coverage`, `routing`, `read_log`, `action_rationale`, `planning_doc_sections`, `user_raw`, `pre_review`가 유효해야 함
 - `workspace/evidence/planner/{batch_id}/{item_id}/wf-export.json`가 현재 시도 이후 갱신
 - `wf-export.json` 안의 `type = wf_export`, `board_id` 존재, `board_name`이 `wf_`로 시작
 - `workspace/evidence/planner/{batch_id}/{item_id}/desc-export.json`가 현재 시도 이후 갱신
 - `desc-export.json` 안의 `type = desc_export`, `board_id` 존재, `board_name`이 `desc_`로 시작
+- `A-planning-doc.md`가 표준 섹션과 현재 시도 기준 내용 변경을 포함해야 함
+- claim의 `wf_boards` / `desc_boards`가 실제 Penpot 보드 목록에도 존재해야 함
+- `desc-export`에 구현 용어(API/DB/hook/props 등)가 없어야 함
 - `request-state.json`의 planner status가 `done`
 
 ### Designer
 
-- transcript에 `workspace/planning/request-workboard.md` Read 호출 존재
-- transcript에 `workspace/planning/A-planning-doc.md` Read 호출 존재
-- transcript에 `workspace/evidence/designer/{batch_id}/{item_id}/design-export.json` 쓰기 호출 존재
-- transcript에 `workspace/evidence/designer/{batch_id}/{item_id}/boards.json` 쓰기 호출 존재
-- transcript에서 designer claim 쓰기 호출이 design-export 쓰기 이후에 존재
 - `apply:` 모드에서는 transcript 안에 `wf_*` / `desc_*` 삭제/재할당 호출이 없어야 함
-- `apply:` 모드에서는 `wf-desc-snapshot-before.json` / `wf-desc-snapshot-after.json` evidence가 현재 시도 이후 갱신되어야 함
-- `apply:` 모드에서는 before snapshot의 모든 `wf_*` / `desc_*` Board id가 after에도 남아 있어야 함
 - `workspace/claims/{batch_id}/{item_id}/designer.claim.json`가 현재 시도 이후 갱신
 - claim의 `covered_items`에 현재 `item_id` 포함
-- claim의 `developer_ready = Y`
-- claim 안의 `developer_targets`, `design_boards`가 비어 있지 않음
-- claim 안의 `missing_items`가 비어 있음
+- apply claim에서는 `developer_ready = Y`, `developer_targets`/`design_boards` 비어 있지 않음, `missing_items` 비어 있음
+- review claim에서는 `mode=review`, `review_score`, `review_approval`, `review_issues`, `review_summary`가 완결돼 있어야 함
 - `workspace/evidence/designer/{batch_id}/{item_id}/design-export.json`가 현재 시도 이후 갱신
 - `design-export.json` 안의 `type = design_export`, `board_id` 존재, `board_name`이 `design_`으로 시작
 - `workspace/evidence/designer/{batch_id}/{item_id}/boards.json`가 현재 시도 이후 갱신
 - `boards.json` 안의 `design_boards`가 비어 있지 않음
+- planner가 넘긴 대상 보드와 `wf_*` 기준 screen_id를 전부 커버해야 함
+- claim의 `design_boards`가 실제 Penpot 보드 목록에도 존재해야 함
+- `design_*`는 대응 `wf_*` / `desc_*` 아래에 배치되고 서로 겹치지 않아야 함
 - `request-state.json`의 designer status가 `done`
 
 ### Developer

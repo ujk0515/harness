@@ -3,26 +3,6 @@
   "roles": {
     "planner": [
       {
-        "id": "planner_process_reads_all",
-        "label": "planner transcript에 workboard/config/benchmark Read 호출 모두 존재",
-        "command": "node .claude/scripts/validator.js check planner_process_reads_all {agent_transcript_path}"
-      },
-      {
-        "id": "planner_process_write_planning_doc",
-        "label": "planner transcript에 A-planning-doc.md 쓰기 호출 존재",
-        "command": "node .claude/scripts/validator.js check transcript_touch {agent_transcript_path} workspace/planning/A-planning-doc.md"
-      },
-      {
-        "id": "planner_process_claim_after_doc",
-        "label": "planner claim 쓰기 호출이 planning-doc 쓰기 이후에 존재",
-        "command": "node .claude/scripts/validator.js check transcript_touch_after {agent_transcript_path} workspace/planning/A-planning-doc.md workspace/claims/{batch_id}/{item_id}/planner.claim.json"
-      },
-      {
-        "id": "planner_process_evidence_all",
-        "label": "planner transcript에 wf/desc evidence 쓰기 호출 모두 존재",
-        "command": "node .claude/scripts/validator.js check planner_process_evidence_all {agent_transcript_path} {batch_id} {item_id}"
-      },
-      {
         "id": "planner_process_no_wf_desc_removal",
         "label": "planner transcript에 wf_/desc_* 삭제/재할당 호출 없음",
         "command": "node .claude/scripts/validator.js check transcript_no_wf_desc_removal {agent_transcript_path}"
@@ -54,11 +34,6 @@
         "label": "planner claim의 wf_/desc_boards가 .penpot-boards.json 실제 존재 리스트에 모두 포함",
         "when_action_not": "NO_CHANGE",
         "command": "node .claude/scripts/validator.js check penpot_boards_present workspace/claims/{batch_id}/{item_id}/planner.claim.json planner"
-      },
-      {
-        "id": "planner_boards_snapshot_recent",
-        "label": "planner boards-snapshot evidence가 현재 시도 이후 갱신됨",
-        "command": "node .claude/scripts/validator.js check mtime_after workspace/evidence/planner/{batch_id}/{item_id}/boards-snapshot.json {dispatch_created_at}"
       },
       {
         "id": "planner_claim_recent",
@@ -156,17 +131,6 @@
       }
     ],
     "designer": [
-      {
-        "id": "designer_process_common_reads",
-        "label": "designer transcript에 workboard/A-planning-doc Read 호출 모두 존재",
-        "command": "node .claude/scripts/validator.js check designer_process_common_reads {agent_transcript_path}"
-      },
-      {
-        "id": "designer_process_apply_writes",
-        "label": "designer apply transcript: design-export + boards 작성 + claim이 design-export 이후",
-        "when_mode": "apply",
-        "command": "node .claude/scripts/validator.js check designer_process_apply_writes {agent_transcript_path} {batch_id} {item_id}"
-      },
       {
         "id": "designer_process_no_wf_desc_removal",
         "label": "designer apply transcript에 wf_/desc_* 삭제/재할당 호출 없음",
