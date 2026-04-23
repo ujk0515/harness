@@ -31,9 +31,14 @@
   - 서버 명령
   - 기본 URL
   - API URL
+  - smoke 명령
+  - full 명령 (있을 때)
+  - diag 명령 (있을 때)
   - item 범위 target spec 또는 grep
+  - 스크린샷/리포트 경로
   - 권장 검증 명령
 - 포트나 명령을 모르면 추측으로 늘리지 말고 `미정`으로 적고 후속 확인 대상으로 남긴다.
+- Playwright를 쓰는 repo라면 `baseURL`, `webServer`, `projects` 분리 여부를 짧게 적는다.
 
 ## 4. ASCII 작성 기준
 - 기본 화면과 상태 화면을 분리한다.

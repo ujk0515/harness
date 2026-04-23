@@ -42,8 +42,12 @@
 - 서버 명령: 미정
 - 기본 URL: 미정
 - API URL: 미정
+- smoke 명령: 미정
+- full 명령: 미정
+- diag 명령: 미정
 - 대상 spec/grep: 미정
 - 권장 검증 명령: 미정
+- Playwright baseURL/webServer/projects: 미정
 - 산출물 경로: 미정
 
 ## 완료 기준

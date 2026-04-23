@@ -29,17 +29,24 @@ color: yellow
    - 서버 명령
    - 기본 URL
    - API URL
+   - smoke / full / diag 명령
    - target spec 또는 grep
 2. item 범위를 먼저 확정한다.
    - 기본은 현재 item에 대응하는 spec 1개 또는 좁은 grep
    - full suite / diag spec 은 기본값이 아니다
-3. 필요한 서버/프론트 프로세스를 띄운다.
-4. Playwright 테스트를 작성하거나 보완한다.
+3. Playwright를 쓰는 repo라면 config 와 scripts 구조를 먼저 본다.
+   - `playwright.config.*`
+   - `package.json` test scripts
+   - `baseURL`, `webServer`, `projects` 유무
+4. 필요한 서버/프론트 프로세스를 띄운다.
+5. Playwright 테스트를 작성하거나 보완한다.
    - 기존 item spec 이 있으면 우선 재사용
    - 없으면 `workspace/testing/playwright/{item_id}.spec.ts`에 새로 만든다
-5. item 범위만 실제로 실행한다.
-6. 결과를 `workspace/reports/tester-verify_{item_id}.md`에 정리한다.
-7. 실행 계약이 비어 있거나 `미정`이거나 충돌하면 포트를 반복 추측하지 말고 부족한 항목과 시도 범위를 적는다.
+   - 가능하면 smoke/item 영역에 둔다
+   - diag/debug 성격이면 기본 실행 경로와 분리한다
+6. item 범위만 실제로 실행한다.
+7. 결과를 `workspace/reports/tester-verify_{item_id}.md`에 정리한다.
+8. 실행 계약이 비어 있거나 `미정`이거나 충돌하면 포트를 반복 추측하지 말고 부족한 항목과 시도 범위를 적는다.
 
 ## 결과 파일 권장
 - Playwright spec:
@@ -56,6 +63,11 @@ color: yellow
 - 가능한 한 실제 클릭, 입력, 이동을 확인한다.
 - 기본은 item 범위만 실행한다.
 - 기존 전체 testDir, full 회귀, diag/debug spec 을 무심코 실행하지 않는다.
+- Playwright config 가 있다면 `projects` 로 smoke / full / diag 가 분리되어 있는 편이 좋다.
+- `baseURL` 은 config/project 에 두고 spec 안에서 직접 포트를 하드코딩하지 않는다.
+- `webServer` 또는 동등한 실행 스크립트가 있으면 그것을 우선 사용한다.
+- 스크린샷/로그 경로는 repo 상대 경로 하나로 통일한다.
+- `waitForTimeout` 는 기본 해결책이 아니다.
 - 실행 계약이 없으면 repo 안에서 한 번만 합리적 가정을 하고, 계속 헤매지 않는다.
 - 절대 경로를 쓰지 않는다.
 - 다른 repo 또는 다른 머신 경로를 하드코딩하지 않는다.
@@ -66,3 +78,4 @@ color: yellow
 - 실행한 경로/명령
 - 결과 파일 경로
 - 통과 여부와 남은 이슈 요약
+- config / scripts 구조 리스크가 있으면 짧게 명시
