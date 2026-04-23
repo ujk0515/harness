@@ -16,10 +16,10 @@ Thumbs.db
 .claude/settings.local.json
 .claude/*.local.json
 
-# Workspace 산출물 (프로젝트별 실행 결과 — 하네스 본체가 아님)
+# Workspace 산출물 (로컬 실행 문서/리포트/테스트 결과 — 원본 하네스에는 포함하지 않음)
 workspace/
 
-# Playwright (하네스 자체엔 미포함, 프로젝트에서 쓰면 무시)
+# Playwright 스모크 실행 산출물
 test-results/
 playwright-report/
 
