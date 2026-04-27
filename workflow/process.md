@@ -17,12 +17,30 @@
 - `workspace/planning/project-config.md`
 - `workspace/planning/request-workboard.md`
 - `workspace/planning/A-benchmark.md`
-- `workspace/planning/plan_{item_id}_{short_title}.md`
+- `workspace/cycles/{batch_id}_{YYYYMMDD-HHMM}.md` (사이클 통합 문서)
 - `workspace/development/**`
-- `workspace/reviews/**`
 - `workspace/testing/**`
 - `workspace/reports/**`
 - `workspace/lessons-learned.md`
+
+## 사이클 통합 문서 규칙
+- 한 batch = `workspace/cycles/{batch_id}_{YYYYMMDD-HHMM}.md` 파일 1개.
+- 모든 에이전트(planner / designer / developer / qa / tester / secretary)는 이 파일 안에 자기 전용 섹션을 갖는다.
+- 자기 섹션은 in-place 수정 가능. **다른 에이전트 섹션은 읽기 전용**. 직접 수정 금지.
+- 다른 에이전트 산출물에 대한 의견/딴지는 같은 파일 하단의 `## [코멘트/이슈]` 섹션에 `[보낸이→받는이]` 형식으로 추가한다.
+- 코멘트를 받은 에이전트는 자기 섹션을 갱신한 뒤 해당 코멘트 줄의 상태를 `open → resolved` 로 바꾼다.
+- 통합 문서 헤더(제목, batch_id, 생성일시, 참여 에이전트, 종료일시)는 `.claude/scripts/cycle-init.js` 가 강제 주입/갱신한다. 사람 손으로 형식을 바꾸지 않는다.
+- 같은 batch에서 재호출/재기획이 일어나도 새 파일을 만들지 않고 같은 파일 안에서 자기 섹션을 갱신한다. **새 파일은 새 batch에서만 생성한다.**
+- `workspace/cycles/` 폴더는 최대 **10개**까지만 유지한다. 11개째 파일이 생기면 `.claude/scripts/cycle-rotate.js` 가 가장 오래된 timestamp 파일을 자동 삭제한다.
+
+## 통합 문서 섹션 순서
+- `## [Planner]`
+- `## [Designer]`
+- `## [Developer]`
+- `## [QA]`
+- `## [Tester]`
+- `## [Secretary]`
+- `## [코멘트/이슈]`
 
 ## 시작 규칙
 1. 사용자 요청에서 아래를 먼저 확인한다.
@@ -89,15 +107,20 @@
   - 백엔드/API
   - 테스트/검증
 
-## 한 사이클 = 계획 md 1개
-- planner는 item마다 새 계획 파일을 만든다.
-- 기본 파일명:
-  - `workspace/planning/plan_{item_id}_{short_title}.md`
-- 같은 item을 다시 계획하면 새 파일을 만든다.
-  - 예: `plan_R3_checkout.md`
-  - 예: `plan_R3_checkout_r2.md`
-- 이전 파일을 덮어쓰지 않는다.
-- downstream 역할에는 항상 **최신 계획 파일 경로를 프롬프트에 명시**해 전달한다.
+## 한 사이클 = 통합 문서 1개
+- batch마다 `workspace/cycles/{batch_id}_{YYYYMMDD-HHMM}.md` 파일 1개를 만든다.
+- planner / designer / developer / qa / tester / secretary 가 이 파일 안에 자기 섹션을 채운다.
+- 같은 batch 안에서는 새 파일을 만들지 않는다. 자기 섹션을 in-place 갱신한다.
+- 새 batch가 시작될 때만 새 통합 문서를 생성한다.
+- downstream 역할에는 항상 **현재 batch 통합 문서 경로를 프롬프트에 명시**해 전달한다.
+
+### 통합 문서 생성/조회 절차 (메인 하네스 책임)
+1. 새 batch 시작 시점에 메인 하네스가 한 번 실행:
+   - `node .claude/scripts/cycle-init.js {batch_id} "{title}"`
+   - stdout 으로 통합 문서 절대 경로가 출력된다. 같은 batch 재호출 시 같은 경로가 나온다.
+2. 그 경로를 모든 에이전트 dispatch prompt 의 `통합 문서:` 헤더에 그대로 넣어 전달한다.
+3. 마지막으로 secretary 호출이 끝나면 메인 하네스가 통합 문서 헤더의 `종료일시: (미정)` 줄을 실제 시각(YYYY-MM-DD HH:MM)으로 1회 갱신한다.
+4. 폴더 한도(10개) 정리는 `cycle-rotate.js` 가 Stop / SubagentStop hook 으로 자동 처리. 사람이 따로 호출하지 않는다.
 
 ## 계획 md 필수 구조
 - 표준은 `workflow/standards/planning-doc-sections.md`
@@ -197,18 +220,14 @@
 - 필요하면 `workspace/lessons-learned.md`에 짧게 교훈을 누적한다.
 
 ## 리뷰/리포트 권장 경로
-- developer review:
-  - `workspace/reviews/{batch_id}/{item_id}/developer-review.md`
-- qa review:
-  - `workspace/reviews/{batch_id}/{item_id}/qa-review.md`
-- qa testcase:
-  - `workspace/testing/testcases_{item_id}.md`
-- qa verify:
-  - `workspace/reports/qa-verify_{item_id}.md`
-- tester verify:
-  - `workspace/reports/tester-verify_{item_id}.md`
-- final report:
-  - `workspace/reports/final-report.md`
+- developer review / qa review / planner 회신 등 모든 문서 형태의 의견은 사이클 통합 문서(`workspace/cycles/{batch_id}_{ts}.md`) 안의 자기 섹션 또는 `## [코멘트/이슈]` 영역에 적는다.
+- 다음은 **통합 문서 외부에 별도 파일로 남기는 것을 허용**한다 (코드/실행 산출물 성격이라 본문에 다 박으면 가독성이 깨지기 때문):
+  - qa testcase: `workspace/testing/testcases_{item_id}.md`
+  - tester spec: `workspace/testing/playwright/{item_id}.spec.ts`
+  - 실행 결과 JSON: `workspace/reports/playwright-results-{item_id}.json`
+  - 실행 로그: `workspace/reports/playwright-run-{item_id}.log`
+  - final report: `workspace/reports/final-report.md`
+- 위 외부 파일을 만들었으면 통합 문서의 자기 섹션에 **경로만** 인용한다. 본문 복붙은 하지 않는다.
 
 ## planner 권장 절차
 1. `request-workboard.md` 읽기
@@ -260,9 +279,17 @@
 - 의존 서비스가 실제로 내려가 있음
 - 사용자 판단이 꼭 필요한 범위 변경
 
+## 코멘트/이슈 영역 규칙
+- 형식: `- [{보낸이}→{받는이}] (open|resolved) {YYYY-MM-DD HH:MM} 내용`
+- 예: `- [Designer→Planner] (open) 2026-04-28 14:30 로그인 화면 빈 상태 누락`
+- 코멘트는 **추가만**. 다른 사람이 쓴 코멘트 본문을 고쳐 쓰지 않는다.
+- 받는이가 자기 섹션을 갱신한 뒤 그 줄의 `(open)` 을 `(resolved)` 로 바꾼다.
+- resolved 줄을 다시 open 으로 되돌리지 않는다. 재논의가 필요하면 새 코멘트 줄을 추가한다.
+
 ## 하지 않는 것
 - 무거운 게이트 계층 재도입
 - 외부 디자인 툴 재도입
 - 행정 문서 중심 흐름 재도입
 - 상태 JSON으로 흐름 강제
 - 에이전트 산출물 외 별도 행정 문서 강제
+- 통합 문서 안에서 다른 에이전트 섹션을 직접 수정

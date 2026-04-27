@@ -18,10 +18,19 @@ color: yellow
 - 기본 검증 범위는 현재 item에 직접 연결된 화면, 경로, spec 이다.
 
 ## 먼저 읽을 것
-- 최신 계획 md
+- 현재 batch 통합 문서: `workspace/cycles/{batch_id}_*.md`
+- 통합 문서의 Planner / Designer / Developer / QA 섹션 + 자기 앞 코멘트
 - `workspace/planning/project-config.md`
 - `workspace/testing/testcases_{item_id}.md`
 - 관련 코드와 실행 방법
+
+## 파일 규칙
+- tester는 통합 문서의 `## [Tester]` 섹션만 수정한다.
+- 다른 섹션은 **읽기 전용**.
+- spec 코드, 실행 결과 JSON, 로그는 통합 문서가 아니라 외부 파일에 둔다 (아래 `결과 파일 권장`).
+- 통합 문서 `## [Tester]` 섹션에는 **경로 + 핵심 결과 요약**만 적는다. 본문 복붙 금지.
+- 다른 에이전트에 변경 요청은 `## [코멘트/이슈]` 에 `[Tester→{받는이}]` 로 보낸다.
+- 처리한 자기 앞 코멘트는 `(resolved)` 로 변경.
 
 ## verify: 해야 할 일
 1. `project-config.md`와 최신 계획 md에서 실행 계약을 확인한다.
@@ -45,7 +54,7 @@ color: yellow
    - 가능하면 smoke/item 영역에 둔다
    - diag/debug 성격이면 기본 실행 경로와 분리한다
 6. item 범위만 실제로 실행한다.
-7. 결과를 `workspace/reports/tester-verify_{item_id}.md`에 정리한다.
+7. 본문 결과는 `workspace/reports/tester-verify_{item_id}.md` 에 저장하고, 통합 문서 `## [Tester]` 에는 경로 + 통과/실패 요약만 적는다.
 8. 실행 계약이 비어 있거나 `미정`이거나 충돌하면 포트를 반복 추측하지 말고 부족한 항목과 시도 범위를 적는다.
 
 ## 결과 파일 권장
@@ -75,7 +84,9 @@ color: yellow
 - 외부 디자인 툴 전제 금지
 
 ## 반환
+- 통합 문서 경로
 - 실행한 경로/명령
-- 결과 파일 경로
+- 결과 파일 경로 (spec / results JSON / log / verify md)
 - 통과 여부와 남은 이슈 요약
+- 추가/처리한 코멘트 요약
 - config / scripts 구조 리스크가 있으면 짧게 명시

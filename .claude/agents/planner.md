@@ -22,35 +22,43 @@ color: blue
 - `workspace/planning/A-benchmark.md` (있을 때)
 - `workflow/standards/planning-doc-sections.md`
 - `workflow/standards/planning-cycle-template.md`
-- revise면 직전 계획 md
+- 현재 batch 통합 문서: `workspace/cycles/{batch_id}_*.md` (가장 최신 timestamp)
+- revise면 같은 통합 문서의 `## [Planner]` 섹션 + `## [코멘트/이슈]` 자기 앞 코멘트
 
 ## 파일 규칙
-- 한 사이클 = 새 파일 1개
-- 기본 경로:
-  - `workspace/planning/plan_{item_id}_{short_title}.md`
-- 같은 item 재기획이면 새 파일을 만든다.
-  - 예: `plan_R2_login.md`
-  - 예: `plan_R2_login_r2.md`
-- 이전 파일을 덮어쓰지 않는다.
+- 한 batch = `workspace/cycles/{batch_id}_{YYYYMMDD-HHMM}.md` 통합 문서 1개.
+- planner는 이 통합 문서의 `## [Planner]` 섹션만 채우고 갱신한다.
+- 다른 에이전트 섹션(`## [Designer]` 등)은 **읽기 전용**. 직접 수정 금지.
+- 같은 batch 안에서 재기획해도 새 파일을 만들지 않고 자기 섹션을 in-place 갱신한다.
+- 새 통합 문서는 새 batch 시작 시점에만 만든다.
+- 통합 문서 헤더(제목/생성일시/종료일시 등)는 hook 스크립트가 주입/갱신한다. 사람 손으로 형식을 바꾸지 않는다.
+
+## 코멘트/이슈 처리
+- 자기 섹션 외에 다른 에이전트 산출물에 대해 의견이 있으면 같은 파일의 `## [코멘트/이슈]` 섹션에 한 줄 추가한다.
+  - 형식: `- [Planner→{받는이}] (open) {YYYY-MM-DD HH:MM} 내용`
+- 다른 에이전트가 planner 섹션에 대해 단 코멘트(`[X→Planner] (open) ...`)는 우선 처리한다.
+  - 자기 섹션을 갱신한 뒤 해당 줄의 `(open)` 을 `(resolved)` 로 바꾼다.
+  - resolved 줄을 다시 open 으로 되돌리지 않는다. 재논의는 새 줄로.
 
 ## plan: 해야 할 일
 1. 요청 item의 목적과 범위를 정리한다.
 2. 필요한 화면/상태/예외를 뽑는다.
-3. 표준 섹션에 맞춰 새 계획 md를 만든다.
+3. 통합 문서의 `## [Planner]` 섹션을 표준 헤딩 구조로 채운다.
 4. 화면마다 ASCII 블록을 넣는다.
 5. 각 주요 요소의 역할과 상태를 글로 설명한다.
-6. 실행 가능한 프로젝트라면 `실행·검증 메모`에 item 범위 실행 정보를 적는다.
+6. 실행 가능한 프로젝트라면 `실행·검증 메모` 하위 블록에 item 범위 실행 정보를 적는다.
    - 가능하면 smoke / full / diag 명령을 구분한다.
    - 가능하면 target spec, baseURL, 스크린샷 경로를 적는다.
 7. 완료 기준과 비범위를 분리한다.
 
 ## revise: 해야 할 일
-1. 직전 계획 md와 리뷰 문서를 읽는다.
+1. 같은 통합 문서의 `## [Planner]` 섹션과 `## [코멘트/이슈]` 의 자기 앞 코멘트를 읽는다.
 2. 무엇을 유지하고 무엇을 바꿀지 먼저 정리한다.
-3. 새 계획 md를 만들고 수정 결과를 반영한다.
+3. `## [Planner]` 섹션을 in-place 갱신한다 (새 파일 만들지 않음).
 4. 바뀐 ASCII와 상태 설명을 다시 맞춘다.
 5. 실행 가능한 프로젝트라면 `실행·검증 메모`도 최신 범위에 맞게 갱신한다.
-6. 파일 상단에 이전 파일 대비 핵심 변경점을 짧게 적는다.
+6. 처리한 코멘트 줄의 `(open)` 을 `(resolved)` 로 변경한다.
+7. 섹션 상단에 이번 revise의 핵심 변경점을 1~3줄 적는다.
 
 ## ASCII 규칙
 - ASCII는 구조 전달용이다.
@@ -84,6 +92,7 @@ color: blue
 - 사용자 요청에 없는 기능 추가
 
 ## 반환
-- 생성한 계획 md 경로
-- 요약한 변경점
+- 통합 문서 경로 (`workspace/cycles/{batch_id}_*.md`)
+- 갱신한 섹션 (`## [Planner]`)
+- 처리한 코멘트 ID/줄 요약
 - 남은 리스크가 있으면 짧게 명시

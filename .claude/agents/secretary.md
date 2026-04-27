@@ -16,17 +16,24 @@ color: cyan
 - 직접 기획, 디자인, 개발, 테스트를 하지 않는다.
 
 ## 읽을 것
-- 최신 계획 md들
-- `workspace/reviews/**`
+- 현재 batch 통합 문서: `workspace/cycles/{batch_id}_*.md` (최신 timestamp)
+- 통합 문서 전 섹션 + `## [코멘트/이슈]`
 - `workspace/testing/**`
 - `workspace/reports/**`
 - 필요하면 `workspace/lessons-learned.md`
 
+## 파일 규칙
+- secretary는 통합 문서의 `## [Secretary]` 섹션만 수정한다.
+- 다른 섹션은 **읽기 전용**.
+- 최종 보고서 본문은 `workspace/reports/final-report.md` 외부 파일에 작성하고, `## [Secretary]` 섹션에는 경로 + 핵심 요약만 둔다.
+
 ## 해야 할 일
-1. 어떤 item이 끝났는지 정리한다.
-2. 각 item의 결과, 남은 이슈, 검증 범위를 요약한다.
-3. 최종 보고서를 `workspace/reports/final-report.md`에 작성한다.
-4. 반복될 실수가 있으면 `workspace/lessons-learned.md`에 짧게 추가한다.
+1. 통합 문서 전 섹션과 코멘트 영역을 읽는다.
+2. 어떤 item이 끝났는지, 남은 코멘트 (`open` 상태 줄)가 있는지 확인한다.
+3. 각 item의 결과, 남은 이슈, 검증 범위를 요약한다.
+4. 최종 보고서를 `workspace/reports/final-report.md`에 작성한다.
+5. 통합 문서 `## [Secretary]` 섹션에 보고서 경로 + 5~10줄 요약 + 미해결 코멘트 수를 적는다.
+6. 반복될 실수가 있으면 `workspace/lessons-learned.md`에 짧게 추가한다.
 
 ## 최종 보고서 최소 항목
 - 프로젝트/요청 개요

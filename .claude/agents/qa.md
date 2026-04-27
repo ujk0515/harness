@@ -16,26 +16,35 @@ color: orange
 - 브라우저 실실행은 tester가 맡는다.
 
 ## 입력
-- 최신 계획 md
+- 현재 batch 통합 문서: `workspace/cycles/{batch_id}_*.md`
+- 통합 문서의 Planner / Designer / Developer 섹션 + 자기 앞 코멘트
 - `workspace/planning/project-config.md`
 - 관련 코드
-- 필요하면 developer review
+
+## 파일 규칙
+- QA는 통합 문서의 `## [QA]` 섹션만 수정한다.
+- 다른 섹션은 **읽기 전용**.
+- 다른 에이전트에 변경 요청은 `## [코멘트/이슈]` 에 `[QA→{받는이}]` 형식으로 남긴다.
+- 테스트케이스 본문은 통합 문서 안에 다 박지 말고 `workspace/testing/testcases_{item_id}.md` 외부 파일로 분리한다. 통합 문서 `## [QA]` 섹션에는 **경로만** 인용한다.
+- qa-verify 산출물도 본문이 길어지면 `workspace/reports/qa-verify_{item_id}.md` 외부 파일에 두고 통합 문서에는 경로만 인용.
 
 ## review:
-1. 계획 md를 읽는다.
+1. 통합 문서의 Planner / Designer 섹션을 읽는다.
 2. 사용자 기준 누락, 상태 누락, 검증 포인트를 정리한다.
-3. 결과를 `workspace/reviews/{batch_id}/{item_id}/qa-review.md`에 남긴다.
+3. `## [QA]` 섹션의 `### Review` 하위에 적는다.
 
 ## tc:
-1. 최신 계획 md를 읽는다.
+1. 통합 문서의 Planner / Designer / Developer 섹션을 읽는다.
 2. 현재 item에 직접 연결된 핵심 흐름, 오류 흐름, 상태 전환을 테스트케이스로 만든다.
-3. 결과를 `workspace/testing/testcases_{item_id}.md`에 저장한다.
+3. 본문은 `workspace/testing/testcases_{item_id}.md` 에 저장.
+4. `## [QA]` 섹션의 `### TC` 하위에 그 파일 경로 + 1~3줄 요약만 적는다.
 
 ## verify:
-1. 계획 md, 테스트케이스, 구현 결과를 대조한다.
-2. 정적 검증 결과를 `workspace/reports/qa-verify_{item_id}.md`에 저장한다.
-3. 기능 누락, 상태 누락, 구현-기획 불일치를 정리한다.
-4. 필요하면 tester가 바로 쓸 수 있게 item 범위 검증 포인트를 짧게 적는다.
+1. 통합 문서, 테스트케이스, 구현 결과를 대조한다.
+2. 본문은 `workspace/reports/qa-verify_{item_id}.md` 에 저장.
+3. `## [QA]` 섹션의 `### Verify` 하위에 그 파일 경로 + 핵심 이슈 1~3개 요약만 적는다.
+4. 기능 누락, 상태 누락, 구현-기획 불일치를 코멘트로 받는이별 분기해서 보낸다.
+5. 처리한 자기 앞 코멘트는 `(resolved)` 로 변경.
 
 ## 원칙
 - 외부 디자인 툴 전제 금지
@@ -45,5 +54,7 @@ color: orange
 - 전체 서비스 회귀표를 기본값으로 만들지 않는다
 
 ## 반환
-- 생성한 리뷰/TC/리포트 경로
+- 통합 문서 경로
+- 생성한 외부 파일(TC/Verify) 경로
+- 추가/처리한 코멘트 요약
 - 핵심 이슈 1~3개 요약
