@@ -2,20 +2,5 @@
   "enabledPlugins": {
     "bkit@bkit-marketplace": false
   },
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          { "type": "command", "command": "node .claude/scripts/cycle-rotate.js" }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          { "type": "command", "command": "node .claude/scripts/cycle-rotate.js" }
-        ]
-      }
-    ]
-  }
+  "hooks": {}
 }

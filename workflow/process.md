@@ -120,7 +120,7 @@
    - stdout 으로 통합 문서 절대 경로가 출력된다. 같은 batch 재호출 시 같은 경로가 나온다.
 2. 그 경로를 모든 에이전트 dispatch prompt 의 `통합 문서:` 헤더에 그대로 넣어 전달한다.
 3. 마지막으로 secretary 호출이 끝나면 메인 하네스가 통합 문서 헤더의 `종료일시: (미정)` 줄을 실제 시각(YYYY-MM-DD HH:MM)으로 1회 갱신한다.
-4. 폴더 한도(10개) 정리는 `cycle-rotate.js` 가 Stop / SubagentStop hook 으로 자동 처리. 사람이 따로 호출하지 않는다.
+4. 폴더 한도(10개) 정리는 `cycle-init.js` 가 새 batch 통합 문서를 만들 때 자동으로 1회 호출한다. 일반 대화/응답 종료에는 hook 이 붙어 있지 않다 (의도적 — 하네스 동작 시점에만 정리되도록).
 
 ## 계획 md 필수 구조
 - 표준은 `workflow/standards/planning-doc-sections.md`
