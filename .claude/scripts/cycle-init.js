@@ -56,9 +56,6 @@ function buildSkeleton({ batchId, title, stamp, createdAt }) {
 ## [Planner]
 _(planner가 채움)_
 
-## [Designer]
-_(designer가 채움)_
-
 ## [Developer]
 _(developer가 채움)_
 

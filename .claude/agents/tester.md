@@ -19,7 +19,7 @@ color: yellow
 
 ## 먼저 읽을 것
 - 현재 batch 통합 문서: `workspace/cycles/{batch_id}_*.md`
-- 통합 문서의 Planner / Designer / Developer / QA 섹션 + 자기 앞 코멘트
+- 통합 문서의 Planner / Developer / QA 섹션 + 자기 앞 코멘트
 - `workspace/planning/project-config.md`
 - `workspace/testing/testcases_{item_id}.md`
 - 관련 코드와 실행 방법

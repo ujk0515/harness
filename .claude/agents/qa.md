@@ -17,7 +17,7 @@ color: orange
 
 ## 입력
 - 현재 batch 통합 문서: `workspace/cycles/{batch_id}_*.md`
-- 통합 문서의 Planner / Designer / Developer 섹션 + 자기 앞 코멘트
+- 통합 문서의 Planner / Developer 섹션 + 자기 앞 코멘트
 - `workspace/planning/project-config.md`
 - 관련 코드
 
@@ -29,12 +29,12 @@ color: orange
 - qa-verify 산출물도 본문이 길어지면 `workspace/reports/qa-verify_{item_id}.md` 외부 파일에 두고 통합 문서에는 경로만 인용.
 
 ## review:
-1. 통합 문서의 Planner / Designer 섹션을 읽는다.
+1. 통합 문서의 Planner 섹션을 읽는다.
 2. 사용자 기준 누락, 상태 누락, 검증 포인트를 정리한다.
 3. `## [QA]` 섹션의 `### Review` 하위에 적는다.
 
 ## tc:
-1. 통합 문서의 Planner / Designer / Developer 섹션을 읽는다.
+1. 통합 문서의 Planner / Developer 섹션을 읽는다.
 2. 현재 item에 직접 연결된 핵심 흐름, 오류 흐름, 상태 전환을 테스트케이스로 만든다.
 3. 본문은 `workspace/testing/testcases_{item_id}.md` 에 저장.
 4. `## [QA]` 섹션의 `### TC` 하위에 그 파일 경로 + 1~3줄 요약만 적는다.

@@ -25,7 +25,7 @@
 
 ## 사이클 통합 문서 규칙
 - 한 batch = `workspace/cycles/{batch_id}_{YYYYMMDD-HHMM}.md` 파일 1개.
-- 모든 에이전트(planner / designer / developer / qa / tester / secretary)는 이 파일 안에 자기 전용 섹션을 갖는다.
+- 모든 에이전트(planner / developer / qa / tester / secretary)는 이 파일 안에 자기 전용 섹션을 갖는다.
 - 자기 섹션은 in-place 수정 가능. **다른 에이전트 섹션은 읽기 전용**. 직접 수정 금지.
 - 다른 에이전트 산출물에 대한 의견/딴지는 같은 파일 하단의 `## [코멘트/이슈]` 섹션에 `[보낸이→받는이]` 형식으로 추가한다.
 - 코멘트를 받은 에이전트는 자기 섹션을 갱신한 뒤 해당 코멘트 줄의 상태를 `open → resolved` 로 바꾼다.
@@ -35,7 +35,6 @@
 
 ## 통합 문서 섹션 순서
 - `## [Planner]`
-- `## [Designer]`
 - `## [Developer]`
 - `## [QA]`
 - `## [Tester]`
@@ -109,7 +108,7 @@
 
 ## 한 사이클 = 통합 문서 1개
 - batch마다 `workspace/cycles/{batch_id}_{YYYYMMDD-HHMM}.md` 파일 1개를 만든다.
-- planner / designer / developer / qa / tester / secretary 가 이 파일 안에 자기 섹션을 채운다.
+- planner / developer / qa / tester / secretary 가 이 파일 안에 자기 섹션을 채운다.
 - 같은 batch 안에서는 새 파일을 만들지 않는다. 자기 섹션을 in-place 갱신한다.
 - 새 batch가 시작될 때만 새 통합 문서를 생성한다.
 - downstream 역할에는 항상 **현재 batch 통합 문서 경로를 프롬프트에 명시**해 전달한다.
@@ -158,19 +157,13 @@
 
 ## 권장 역할 순서
 1. planner `plan:` 또는 `revise:`
-2. designer `review:` 또는 `apply:` (UI 작업일 때)
-3. developer `review:` (기술 리스크가 크면)
-4. developer `implement:`
-5. qa `review:` / `tc:` / `verify:`
-6. tester `verify:` (실행 가능한 경우)
-7. secretary
+2. developer `review:` (기술 리스크가 크면)
+3. developer `implement:`
+4. qa `review:` / `tc:` / `verify:`
+5. tester `verify:` (실행 가능한 경우)
+6. secretary
 
 ## 역할 생략 규칙
-- 아래는 보통 designer를 생략해도 된다.
-  - 백엔드-only
-  - 내부 로직 정리
-  - 테스트만 수정
-  - 사용자에게 보이는 UI 변화가 전혀 없는 경우
 - 아래는 보통 planner를 생략하지 않는 편이 낫다.
   - 신규 화면
   - 상태 변화가 많은 UI 수정
@@ -185,11 +178,6 @@
 - 계획 md 안에 기획 + ASCII 화면 + 요소 디스크립션을 통합한다.
 - 실행 가능한 프로젝트라면 tester가 바로 쓸 수 있게 item 범위 실행 메모를 적는다.
 - revise도 새 파일로 만든다.
-
-### designer
-- 외부 디자인 도구 없이 문서 안에서 ASCII와 UI 메모를 다룬다.
-- `review:`는 검토 메모를 남기고
-- `apply:`는 최신 계획 md의 ASCII/설명 섹션을 다듬는다.
 
 ### developer
 - 최신 계획 md와 코드베이스를 기준으로 구현한다.
@@ -241,12 +229,6 @@
 9. 동작·상태 작성
 10. 완료 기준과 비범위 정리
 
-## designer 권장 절차
-1. 최신 계획 md 읽기
-2. 화면 구조와 인터랙션을 검토
-3. 혼란, 누락, 상태 부족을 정리
-4. 필요하면 최신 계획 md의 ASCII/설명 섹션 보강
-
 ## developer 권장 절차
 1. 최신 계획 md 읽기
 2. `project-config.md` 읽기
@@ -281,7 +263,7 @@
 
 ## 코멘트/이슈 영역 규칙
 - 형식: `- [{보낸이}→{받는이}] (open|resolved) {YYYY-MM-DD HH:MM} 내용`
-- 예: `- [Designer→Planner] (open) 2026-04-28 14:30 로그인 화면 빈 상태 누락`
+- 예: `- [Developer→Planner] (open) 2026-04-28 14:30 로그인 화면 빈 상태 누락`
 - 코멘트는 **추가만**. 다른 사람이 쓴 코멘트 본문을 고쳐 쓰지 않는다.
 - 받는이가 자기 섹션을 갱신한 뒤 그 줄의 `(open)` 을 `(resolved)` 로 바꾼다.
 - resolved 줄을 다시 open 으로 되돌리지 않는다. 재논의가 필요하면 새 코멘트 줄을 추가한다.

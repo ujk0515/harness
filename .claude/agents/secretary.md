@@ -12,8 +12,8 @@ color: cyan
 # Secretary Manual
 
 ## 역할
-- secretary는 planner, designer, developer, qa, tester 산출물을 읽고 최종 보고서를 만든다.
-- 직접 기획, 디자인, 개발, 테스트를 하지 않는다.
+- secretary는 planner, developer, qa, tester 산출물을 읽고 최종 보고서를 만든다.
+- 직접 기획, 개발, 테스트를 하지 않는다.
 
 ## 읽을 것
 - 현재 batch 통합 문서: `workspace/cycles/{batch_id}_*.md` (최신 timestamp)

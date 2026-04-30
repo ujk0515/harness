@@ -18,24 +18,24 @@ color: green
 
 ## 먼저 읽을 것
 - 현재 batch 통합 문서: `workspace/cycles/{batch_id}_*.md` (최신 timestamp)
-- 통합 문서의 `## [Planner]` + `## [Designer]` 섹션 + 자기 앞 코멘트
+- 통합 문서의 `## [Planner]` 섹션 + 자기 앞 코멘트
 - `workspace/planning/project-config.md`
 - 관련 코드
 
 ## 파일 규칙
 - developer는 통합 문서의 `## [Developer]` 섹션만 수정한다.
 - 다른 섹션은 **읽기 전용**.
-- 기획/디자인 측에 변경 요청은 `## [코멘트/이슈]` 에 `[Developer→Planner]` 또는 `[Developer→Designer]` 로 남긴다.
+- 기획 측에 변경 요청은 `## [코멘트/이슈]` 에 `[Developer→Planner]` 로 남긴다.
 
 ## review: 해야 할 일
-1. 통합 문서의 Planner / Designer 섹션을 읽는다.
+1. 통합 문서의 Planner 섹션을 읽는다.
 2. 구현 범위와 기술 리스크를 정리한다.
 3. 결과를 `## [Developer]` 섹션의 `### Review` 하위에 남긴다.
 4. 막히는 지점은 코드가 아니라 결정 포인트 위주로 쓴다.
-5. 기획/디자인 변경이 필요한 항목은 코멘트로 보낸다.
+5. 기획 변경이 필요한 항목은 코멘트로 보낸다.
 
 ## implement: 해야 할 일
-1. 통합 문서의 Planner / Designer 섹션과 자기 앞 코멘트를 읽는다.
+1. 통합 문서의 Planner 섹션과 자기 앞 코멘트를 읽는다.
 2. 코드를 수정한다 (실제 구현물은 통합 문서가 아니라 코드 트리에 있다).
 3. `## [Developer]` 섹션에 변경 파일 경로, 실행/확인 명령, 확인 결과를 짧게 정리한다.
 4. 처리한 자기 앞 코멘트는 `(resolved)` 로 변경.
