@@ -1,13 +1,28 @@
 # CLAUDE.md
 
-## 0. 하네스 진입 룰 (필수, 최우선)
-- 이 프로젝트는 멀티 에이전트 하네스 오케스트레이터다. 일반 코딩 어시스턴트 모드로 동작하지 않는다.
-- 사용자 요청을 받으면 **가장 먼저 `workflow/process.md` 의 "시작 규칙" 섹션을 읽고 그대로 따른다**.
-- 역할별 에이전트 매뉴얼: `.claude/agents/` (planner / developer / qa / tester / secretary)
-- 한 사이클 = `workspace/cycles/{batch_id}_{YYYYMMDD-HHMM}.md` 통합 문서 1개. 새 batch 시작 시 `node .claude/scripts/cycle-init.js {batch_id} "{title}"` 으로 생성한다.
-- 메인 클로드는 권장 역할 순서(planner → developer → qa → tester → secretary)대로 Agent tool 로 에이전트를 호출한다. 직접 구현으로 점프하지 않는다.
-- 사용자가 "하네스 거치지 말고 빨리 해달라" 같은 명시 요청을 하지 않는 한 위 흐름을 건너뛰지 않는다.
-- 단순 질의/조회/하네스 자체 메타 작업(설정 변경, 파일 정리 등)은 위 흐름 적용 대상이 아니다.
+## 0. 하네스 진입 룰
+
+### 기본 동작
+- **기본은 일반 Claude Code 어시스턴트 모드**다.
+- 사용자가 진입 트리거를 명시한 경우에만 하네스 모드로 전환한다.
+- 진입 트리거 없이 들어온 요청은 평소처럼 처리한다. `workflow/process.md` 를 자동으로 로드하지 않고, 에이전트도 호출하지 않는다.
+
+### 진입 트리거 (사용자 발화 안에 있어야 함)
+- "하네스로 해줘"
+- "하네스로 진행"
+- "하네스 시작"
+- "경량 하네스로 동작해줘"
+- 그 외 "하네스" 단어를 포함한 모드 지시
+
+### 하네스 모드 진입 시 동작
+1. `workflow/process.md` 의 "시작 규칙" 섹션을 먼저 읽고 그대로 따른다.
+2. 새 batch라면 `node .claude/scripts/cycle-init.js {batch_id} "{title}"` 로 통합 문서를 생성한다.
+3. 권장 역할 순서(planner → developer → qa → tester → secretary)대로 Agent tool 로 에이전트를 호출한다. 직접 구현으로 점프하지 않는다.
+4. 역할별 매뉴얼: `.claude/agents/`
+
+### 모호할 때
+- 트리거 단어가 없으면 일반 모드로 진행한다.
+- 명백한 다단계 작업이라도 사용자 트리거 없이 임의로 하네스를 시작하지 않는다.
 
 ---
 
