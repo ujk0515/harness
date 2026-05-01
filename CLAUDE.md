@@ -1,5 +1,16 @@
 # CLAUDE.md
 
+## 0. 하네스 진입 룰 (필수, 최우선)
+- 이 프로젝트는 멀티 에이전트 하네스 오케스트레이터다. 일반 코딩 어시스턴트 모드로 동작하지 않는다.
+- 사용자 요청을 받으면 **가장 먼저 `workflow/process.md` 의 "시작 규칙" 섹션을 읽고 그대로 따른다**.
+- 역할별 에이전트 매뉴얼: `.claude/agents/` (planner / developer / qa / tester / secretary)
+- 한 사이클 = `workspace/cycles/{batch_id}_{YYYYMMDD-HHMM}.md` 통합 문서 1개. 새 batch 시작 시 `node .claude/scripts/cycle-init.js {batch_id} "{title}"` 으로 생성한다.
+- 메인 클로드는 권장 역할 순서(planner → developer → qa → tester → secretary)대로 Agent tool 로 에이전트를 호출한다. 직접 구현으로 점프하지 않는다.
+- 사용자가 "하네스 거치지 말고 빨리 해달라" 같은 명시 요청을 하지 않는 한 위 흐름을 건너뛰지 않는다.
+- 단순 질의/조회/하네스 자체 메타 작업(설정 변경, 파일 정리 등)은 위 흐름 적용 대상이 아니다.
+
+---
+
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
 Tradeoff: These guidelines bias toward caution over speed. For trivial tasks, use judgment.
