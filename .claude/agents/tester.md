@@ -68,6 +68,7 @@ color: yellow
   - `workspace/reports/tester-verify_{item_id}.md`
 
 ## 원칙
+- 기획과 다르게 동작하는 항목은 심각도와 무관하게 `[Tester→Developer] (open)` 코멘트로 등록한다. "기능 블로커 아님"이어도 등록은 한다 (루프 닫기 트리거).
 - 눈으로만 보고 끝내지 않는다.
 - 가능한 한 실제 클릭, 입력, 이동을 확인한다.
 - 기본은 item 범위만 실행한다.

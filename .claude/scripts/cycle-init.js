@@ -4,11 +4,14 @@
  *
  * Usage:
  *   node .claude/scripts/cycle-init.js <batch_id> [title]
+ *   node .claude/scripts/cycle-init.js --update <path>
  *
  * 동작:
  *   1) workspace/cycles/{batch_id}_{YYYYMMDD-HHMM}.md 가 이미 있으면 그 경로만 출력.
  *   2) 없으면 새로 생성하면서 헤더 + 6개 섹션 + 코멘트 영역 골격을 박아넣는다.
  *   3) 종료 시 cycle-rotate.js 를 호출해 폴더 한도(10개) 정리.
+ *   4) --update <path>: 헤더의 종료일시를 현재 시각으로, 참여 에이전트를
+ *      실제 채워진 섹션 기준으로 갱신한다 (batch 종료 시 메인 하네스가 1회 호출).
  *
  * 헤더 형식은 사람이 손대지 않는다. 갱신은 update 모드(`--update <path>`)로만.
  */
@@ -85,11 +88,44 @@ function rotate() {
   }
 }
 
+function updateHeader(filePath) {
+  if (!fs.existsSync(filePath)) {
+    process.stderr.write(`[cycle-init] not found: ${filePath}\n`);
+    process.exit(1);
+  }
+  let body = fs.readFileSync(filePath, 'utf8');
+  body = body.replace(/^- 종료일시: .*$/m, `- 종료일시: ${nowLocalReadable()}`);
+
+  // 참여 에이전트: placeholder(`_(...가 채움)_`)가 아닌 섹션만 집계
+  const roles = ['Planner', 'Developer', 'QA', 'Tester', 'Secretary'];
+  const filled = roles.filter((role) => {
+    const m = body.match(new RegExp(`## \\[${role}\\]\\n([\\s\\S]*?)(?=\\n## \\[|$)`));
+    if (!m) return false;
+    const content = m[1].trim();
+    return content.length > 0 && !content.startsWith('_(');
+  });
+  body = body.replace(
+    /^- 참여 에이전트: .*$/m,
+    `- 참여 에이전트: ${filled.length ? filled.map((r) => r.toLowerCase()).join(', ') : '(없음)'}`
+  );
+
+  fs.writeFileSync(filePath, body, 'utf8');
+  process.stdout.write(filePath + '\n');
+}
+
 function main() {
   const args = process.argv.slice(2);
   if (args.length === 0) {
-    process.stderr.write('Usage: cycle-init.js <batch_id> [title]\n');
+    process.stderr.write('Usage: cycle-init.js <batch_id> [title] | --update <path>\n');
     process.exit(1);
+  }
+  if (args[0] === '--update') {
+    if (!args[1]) {
+      process.stderr.write('Usage: cycle-init.js --update <path>\n');
+      process.exit(1);
+    }
+    updateHeader(path.resolve(args[1]));
+    return;
   }
   const [batchId, ...rest] = args;
   const title = rest.join(' ').trim();
