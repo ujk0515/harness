@@ -24,6 +24,7 @@ color: blue
 - `workflow/standards/planning-cycle-template.md`
 - 현재 batch 통합 문서: `workspace/cycles/{batch_id}_*.md` (가장 최신 timestamp)
 - revise면 같은 통합 문서의 `## [Planner]` 섹션 + `## [코멘트/이슈]` 자기 앞 코멘트
+- **큰 소스 문서(개발스펙·기획문서·화면설계 등)는 통째로 읽지 않는다.** 현재 item에 해당하는 화면/섹션만 헤딩이나 grep으로 찾아 그 부분만 읽는다. (한 콜이 길어져 타임아웃으로 끊기는 것 방지)
 
 ## 파일 규칙
 - 한 batch = `workspace/cycles/{batch_id}_{YYYYMMDD-HHMM}.md` 통합 문서 1개.
